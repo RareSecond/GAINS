@@ -11,7 +11,7 @@ export function Remote() {
   const { profile, error } = useAccount()
   const path = window.location.pathname
   if (path === '/login') return <Login />
-  return <><header className="topbar"><a className="brand" href="/">GAINS<span>TRAINING REMOTE</span></a><a className="icon-link" href="/settings" aria-label="Account settings">⚙</a></header><main>
+  return <><header className={`topbar ${path.startsWith('/sessions/') ? 'session-topbar' : ''}`}><a className="brand" href="/">GAINS<span>TRAINING REMOTE</span></a><a className="icon-link" href="/settings" aria-label="Account settings">⚙</a></header><main className={path.startsWith('/sessions/') ? 'session-main' : undefined}>
     {error && <p role="alert" className="notice warning">{error} Local retention may be unavailable.</p>}
     {profile === undefined ? <p className="muted">Opening your remote…</p> : !profile ? <section className="hero"><p className="eyebrow">READY WHEN YOU ARE</p><h1>Your plan.<br />Your performance.</h1><p>Agree on a workout in ChatGPT. Record what happens here.</p><a className="button" href={`/login?returnTo=${encodeURIComponent(path)}`}>Continue with Google</a></section> :
       path.startsWith('/sessions/') ? <Recorder key={`${profile.id}:${path}`} profile={profile} id={path.split('/')[2]} /> :

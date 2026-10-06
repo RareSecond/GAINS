@@ -32,7 +32,7 @@ For new development migrations only: `npm run db:dev`. Committed releases use `n
 
 ## Recording behavior
 
-Upcoming workouts are previews. Starting creates new execution IDs, freezes the prescription in the same transaction, and leaves every set pending with null actuals. Exact targets can prefill controls; rep ranges require a count. A user explicitly confirms each set; zero reps records a failed attempt. Loads are decimal strings, stored as `Decimal(9,3)`, with kg/lb and explicit conventions. No mixed-unit/convention totals are calculated.
+Upcoming workouts are previews. Starting creates new execution IDs, freezes the prescription in the same transaction, and leaves every set pending with null actuals. The completion button shows the reps and load it will record. Exact targets use one completion button; rep ranges show a big completion button for every count in the range. Tap +/− under adjustments for counts outside the range or corrections. Extra sets without a target require choosing a count. A user explicitly confirms each set; zero reps records a failed attempt. Loads are decimal strings, stored as `Decimal(9,3)`, with kg/lb and explicit conventions. No mixed-unit/convention totals are calculated.
 
 Groups suggest round-robin order but allow arbitrary navigation. Left/right results are independent; copying confirmed measurements is deliberate. Substitution moves pending work into a new execution exercise; performed sets keep their identity. Extra work can be added, and only extra uncompleted work can be removed. Completed sets can be corrected while active. Finish preserves pending versus skipped versus completed, permits early completion, and makes history read-only.
 
