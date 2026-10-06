@@ -1,0 +1,11 @@
+node_modules/
+.cache/
+.env
+.env.*
+!.env.example
+!.env.test.example
+dist/
+.output/
+.tanstack/
+coverage/
+test-results/

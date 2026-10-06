@@ -1,0 +1,144 @@
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { applyOperation, counts, executionOrder, loadLabel, measurementsSchema, targetFor, type Measurements, type Operation, type RecordedExercise, type RecordedSet, type Session } from './lib/domain'
+import { apiGet, apiPost, ApiError } from './lib/api-client'
+import { cacheSession, editLocal, readLocal, sessionKey, syncSession, watchLocal, type Profile } from './lib/local'
+import { enqueue, projected, reapply, type Draft, type LocalSession } from './lib/outbox'
+
+type CatalogItem = { id: string; name: string }
+export function Recorder({ profile, id }: { profile: Profile; id: string }) {
+  const key = sessionKey(profile.id, id)
+  const [record, setRecord] = useState<LocalSession>(), [error, setError] = useState(''), [storageError, setStorageError] = useState(''), [saving, setSaving] = useState(false), [offline, setOffline] = useState(!navigator.onLine)
+  const [catalog, setCatalog] = useState<CatalogItem[]>([]), [selection, setSelection] = useState<{ mode: 'extra' | 'substitute'; exercise?: RecordedExercise }>(), [finish, setFinish] = useState(false)
+  const alive = useRef(true)
+  const synchronize = async () => {
+    if (!alive.current) return
+    setSaving(true)
+    try { await syncSession(profile, id);
+      const remaining = await readLocal<LocalSession>(key)
+      if (remaining?.queue.length && !remaining.conflict && !remaining.blocked) await syncSession(profile, id)
+      if (alive.current) { setOffline(false); setError('') } }
+    catch (e) { if (alive.current) { if (e instanceof ApiError && e.code === 'UNAUTHENTICATED') { setRecord(undefined); setError('Sign in to the original account to resume its retained changes.'); location.assign(`/login?returnTo=${encodeURIComponent(location.pathname)}`) } else { setOffline(!navigator.onLine); setError((e as Error).message) } } }
+    finally { if (alive.current) setSaving(false) }
+  }
+  useEffect(() => {
+    alive.current = true
+    const load = async () => {
+      try {
+        const local = await cacheSession(profile, id); if (alive.current) setRecord(local)
+        const cached = await readLocal<CatalogItem[]>(`catalog:${profile.id}`); if (cached && alive.current) setCatalog(cached)
+        try { const data = await apiGet<{ exercises: CatalogItem[] }>('exercises'); await editLocal(`catalog:${profile.id}`, () => data.exercises); if (alive.current) setCatalog(data.exercises) } catch { /* Cached identities remain available offline. */ }
+        if (navigator.onLine) await synchronize()
+      } catch (e) { if (alive.current) { setError((e as Error).message); if (!(e instanceof ApiError) && navigator.onLine) setStorageError('Local retention unavailable. Check browser storage before recording.') } }
+    }
+    void load()
+    const stop = watchLocal(changed => { if (changed === key) void readLocal<LocalSession>(key).then(r => { if (alive.current) setRecord(r) }).catch(e => setStorageError(e.message)) })
+    const resume = () => { setOffline(!navigator.onLine); if (navigator.onLine) { void cacheSession(profile, id).then(r => { if (alive.current) setRecord(r); return synchronize() }).catch(e => setError(e.message)) } }
+    const disconnected = () => setOffline(true)
+    window.addEventListener('online', resume); window.addEventListener('offline', disconnected); window.addEventListener('focus', resume)
+    return () => { alive.current = false; stop(); window.removeEventListener('online', resume); window.removeEventListener('offline', disconnected); window.removeEventListener('focus', resume) }
+  }, [key])
+  const mutate = async (operation: Operation, resolvedExercise?: CatalogItem) => {
+    setError(''); setSaving(true)
+    try {
+      const result = await editLocal<LocalSession>(key, current => {
+        if (!current) throw new Error('Local session unavailable')
+        const next = enqueue(current, { operationId: crypto.randomUUID(), expectedRevision: current.base.revision + current.queue.length, operation, resolvedExercise })
+        if (operation.kind === 'notes' || operation.kind === 'finish') delete next.sessionNotesDraft
+        if (operation.kind === 'record' || operation.kind === 'skipSet' || operation.kind === 'removeSet') delete next.drafts[operation.setId]
+        return next
+      })
+      setRecord(result)
+      if (navigator.onLine) void synchronize(); else setSaving(false)
+    } catch (e) { setSaving(false); setError((e as Error).message); if (!(e instanceof Error) || !['DomainError', 'Error', 'ZodError'].includes(e.name)) setStorageError('Local retention unavailable. This edit was not saved.') }
+  }
+  const draft = async (setId: string, values: Draft) => {
+    try { await editLocal<LocalSession>(key, r => r ? { ...r, drafts: { ...r.drafts, [setId]: values } } : r) } catch { setStorageError('Local retention unavailable. Draft inputs are not retained; do not close this page.') }
+  }
+  const resolve = async (keepServer: boolean) => {
+    try {
+      const result = await editLocal<LocalSession>(key, r => {
+        if (!r) return r
+        if (keepServer) return { ...r, base: r.conflict ?? r.base, queue: [], drafts: {}, sessionNotesDraft: undefined, conflict: null, blocked: null }
+        return reapply(r)
+      })
+      setRecord(result); setError(''); if (!keepServer) void synchronize()
+    } catch (e) { setError(`These local changes cannot be reapplied: ${(e as Error).message}. They remain retained.`) }
+  }
+  if (!record) return <p role={error ? 'alert' : undefined}>{error || 'Opening your session…'}</p>
+  let session: Session
+  try { session = projected(record) } catch (e) { return <div role="alert"><p>Local edits need attention: {(e as Error).message}</p><button onClick={() => { const blob = new Blob([JSON.stringify(record, null, 2)], { type: 'application/json' }); const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = 'gains-retained-changes.json'; link.click(); URL.revokeObjectURL(link.href) }}>Export retained changes</button></div> }
+  const totals = counts(session), next = executionOrder(session).find(s => s.status === 'PENDING')
+  const readonly = session.status === 'FINISHED' || !!record.conflict || !!record.blocked || !!storageError
+  const pendingFinish = record.queue.some(q => q.operation.kind === 'finish')
+  const saveStatus = storageError ? 'Local retention unavailable' : record.conflict || record.blocked ? 'Conflict · local changes retained' : offline ? `Offline · ${record.queue.length} changes retained` : saving ? 'Saving…' : record.queue.length ? `${record.queue.length} changes pending synchronization` : Object.keys(record.drafts).length || record.sessionNotesDraft !== undefined ? 'Draft inputs retained locally · results saved on server' : 'Saved on server'
+  return <><a className="back" href="/">← Your training</a><div className="page-heading"><p className="eyebrow">{session.status === 'ACTIVE' ? 'SESSION IN PROGRESS' : pendingFinish ? 'FINISH PENDING SYNCHRONIZATION' : 'SESSION FINISHED'}</p><h1>{session.workout.title}</h1><p>{session.workout.notes}</p></div>
+    <div className="save-status" role="status" aria-live="polite"><span className={`status-dot ${record.queue.length || offline ? 'pending' : ''}`} aria-hidden="true" />{saveStatus}{record.queue.length > 0 && !record.conflict && !offline && <button className="text-button" onClick={synchronize}>Retry</button>}</div>
+    {(error || storageError) && <p className="notice warning" role="alert">{storageError || error}</p>}
+    <div className="scoreboard"><div><strong>{totals.completed}</strong><span>completed</span></div><div><strong>{totals.skipped}</strong><span>skipped</span></div><div><strong>{totals.unrecorded}</strong><span>unrecorded</span></div></div>
+    {(record.conflict || record.blocked) && <section className="notice warning"><h2>Your changes need attention</h2><p>{record.blocked ?? 'Another device changed this session. Your local entries are retained below.'}</p>{record.conflict && <><p>Server revision {record.conflict.revision} · {record.conflict.status.toLowerCase()} · {JSON.stringify(counts(record.conflict))}</p><details><summary>Compare server and retained local records</summary><div className="comparison"><div><h3>Server</h3><Comparison session={record.conflict} /></div><div><h3>Your retained version</h3><Comparison session={session} /></div></div></details></>}
+      <button className="secondary" onClick={() => resolve(true)}>Use server version · discard retained edits</button>{record.conflict?.status === 'ACTIVE' && <button onClick={() => resolve(false)}>Reapply compatible local changes</button>}<button className="secondary" onClick={() => { const url = URL.createObjectURL(new Blob([JSON.stringify(record, null, 2)], { type: 'application/json' })); const a = document.createElement('a'); a.href = url; a.download = 'gains-retained-changes.json'; a.click(); URL.revokeObjectURL(url) }}>Export retained changes</button>
+    </section>}
+    {!readonly && next && <a className="next-set" href={`#set-${next.id}`}><span>Next suggested</span><strong>{session.exercises.find(e => e.id === next.sessionExerciseId)?.nameAtRecording} · set {next.setNumber}{next.side !== 'BOTH' ? ` · ${next.side.toLowerCase()}` : ''} ↓</strong></a>}
+    {session.workout.groups.map((g, i) => <section className="group" key={g.id}><div className="section-heading"><h2>{g.kind === 'STRAIGHT' ? `Exercise ${i + 1}` : g.kind === 'SUPERSET' ? 'Superset' : 'Circuit'}</h2><span className="badge">{String(i + 1).padStart(2, '0')}</span></div>{g.kind !== 'STRAIGHT' && <p className="muted">Alternate exercises each round. You can record in any order.</p>}<p>{g.instructions}</p>{g.exercises.map(p => <div className="exercise-slot" key={p.id}><p className="prescribed">Prescribed: {p.nameAtPrescription} {p.optional && <span className="badge">Optional</span>}</p><p>{p.instructions}</p>{session.exercises.filter(e => e.workoutExerciseId === p.id).map(e => <ExerciseCard key={e.id} exercise={e} session={session} readonly={readonly} drafts={record.drafts} onDraft={draft} onMutate={mutate} onSubstitute={() => setSelection({ mode: 'substitute', exercise: e })} />)}</div>)}</section>)}
+    {session.exercises.some(e => !e.workoutExerciseId) && <section className="group"><h2>Extra work</h2>{session.exercises.filter(e => !e.workoutExerciseId).map(e => <ExerciseCard key={e.id} exercise={e} session={session} readonly={readonly} drafts={record.drafts} onDraft={draft} onMutate={mutate} onSubstitute={() => setSelection({ mode: 'substitute', exercise: e })} />)}</section>}
+    {!readonly && <><button className="secondary full" onClick={() => setSelection({ mode: 'extra' })}>＋ Add exercise</button><SessionNotes notes={record.sessionNotesDraft ?? session.notes ?? ''} onDraft={async value => { try { await editLocal<LocalSession>(key, r => r ? { ...r, sessionNotesDraft: value } : r) } catch { setStorageError('Local retention unavailable. Session notes are not retained.') } }} onSave={notes => mutate({ kind: 'notes', notes: notes || null })} /><div className="sticky-action"><button onClick={() => setFinish(true)}>Review & finish workout</button></div></>}
+    {session.status === 'FINISHED' && <p className="notice">{pendingFinish ? 'Finished locally. Earlier entries will sync first, followed by Finish. The server has not acknowledged completion yet.' : `Finished ${session.finishedAt ? new Date(session.finishedAt).toLocaleString() : ''}. Completed history is read-only.`}</p>}
+    {finish && <Dialog title="finish-title" onClose={() => setFinish(false)}><h2 id="finish-title">Finish this session?</h2><p>{totals.completed} completed · {totals.skipped} skipped · {totals.unrecorded} unrecorded</p><p>Unrecorded work stays unrecorded. Completed history becomes read-only.</p><p>{record.queue.length ? `${record.queue.length} preceding changes must synchronize first.` : 'All preceding entries are saved.'}{offline ? ' Finish will be retained locally until you reconnect.' : ''}</p><button onClick={async () => { await mutate({ kind: 'finish', notes: record.sessionNotesDraft ?? session.notes }); setFinish(false) }}>Finish workout</button><button className="secondary" autoFocus onClick={() => setFinish(false)}>Keep training</button></Dialog>}
+    {selection && <ExercisePicker catalog={catalog} onCatalog={setCatalog} selection={selection} onClose={() => setSelection(undefined)} onSelect={async e => { await mutate(selection.mode === 'extra' ? { kind: 'addExercise', exerciseId: e.id, newExerciseRowId: crypto.randomUUID(), notes: null } : { kind: 'substitute', exerciseRowId: selection.exercise!.id, exerciseId: e.id, newExerciseRowId: crypto.randomUUID(), notes: null }, e); setSelection(undefined) }} />}
+  </>
+}
+function ExerciseCard({ exercise: e, session, readonly, drafts, onDraft, onMutate, onSubstitute }: { exercise: RecordedExercise; session: Session; readonly: boolean; drafts: Record<string, Draft>; onDraft: (id: string, values: Draft) => Promise<void>; onMutate: (op: Operation) => Promise<void>; onSubstitute: () => void }) {
+  const planned = session.workout.groups.flatMap(g => g.exercises).find(p => p.id === e.workoutExerciseId)
+  const [extraSide, setExtraSide] = useState<'BOTH' | 'LEFT' | 'RIGHT'>(planned?.sideMode === 'PER_SIDE' ? 'LEFT' : 'BOTH')
+  return <article className="exercise-card"><h3>{e.nameAtRecording}{planned && planned.exerciseId !== e.exerciseId && <span className="badge">Substitution</span>}{!planned && <span className="badge">Extra</span>}</h3><p className="muted">{e.notes}</p>{e.sets.length === 0 && <p className="muted">No sets in this execution slot.</p>}
+    {e.sets.map(set => <SetRow key={`${set.id}:${readonly}`} set={set} session={session} draft={drafts[set.id]} readonly={readonly} onDraft={onDraft} onMutate={onMutate} />)}
+    {!readonly && <div className="exercise-actions"><button className="secondary" onClick={() => onMutate({ kind: 'addSet', exerciseRowId: e.id, newSetId: crypto.randomUUID(), side: extraSide })}>＋ Set</button>{planned?.sideMode === 'PER_SIDE' || !planned ? <label className="inline-label">Side<select value={extraSide} onChange={event => setExtraSide(event.target.value as typeof extraSide)}>{!planned && <option value="BOTH">Both</option>}<option value="LEFT">Left</option><option value="RIGHT">Right</option></select></label> : null}{e.sets.some(s => s.status === 'PENDING') && <><button className="text-button" onClick={onSubstitute}>Substitute</button><button className="text-button" onClick={() => onMutate({ kind: 'skipExercise', exerciseRowId: e.id, notes: null })}>Skip pending exercise work</button></>}{!planned && !e.sets.some(s => s.status === 'COMPLETED') && <button className="text-button" onClick={() => onMutate({ kind: 'removeExercise', exerciseRowId: e.id })}>Remove extra exercise</button>}</div>}
+  </article>
+}
+function initialDraft(set: RecordedSet, session: Session): Draft {
+  const target = targetFor(session, set)
+  return { reps: set.actualReps?.toString() ?? (target && target.repsMin === target.repsMax ? String(target.repsMin) : ''), load: set.status === 'COMPLETED' ? set.actualLoadValue ?? '' : target?.loadValue ?? '', unit: set.actualLoadUnit ?? target?.loadUnit ?? 'KG', convention: set.status === 'COMPLETED' ? set.actualLoadConvention ?? '' : target?.loadConvention ?? 'TOTAL_EXTERNAL', rpe: set.actualRpe?.toString() ?? '', notes: set.notes ?? '' }
+}
+function SetRow({ set, session, draft, readonly, onDraft, onMutate }: { set: RecordedSet; session: Session; draft?: Draft; readonly: boolean; onDraft: (id: string, values: Draft) => Promise<void>; onMutate: (op: Operation) => Promise<void> }) {
+  const [values, setValues] = useState<Draft>(() => draft ?? initialDraft(set, session)), [error, setError] = useState(''), [busy, setBusy] = useState(false), [dirty, setDirty] = useState(!!draft)
+  const target = targetFor(session, set)
+  useEffect(() => { if (draft) { setValues(draft); setDirty(true) } else if (!dirty) setValues(initialDraft(set, session)) }, [draft, set.actualReps, set.actualLoadValue, set.actualRpe])
+  const change = (field: keyof Draft, value: string) => { const next = { ...values, [field]: value }; if (field === 'convention' && value === 'BODYWEIGHT') next.load = ''; setValues(next); setDirty(true); void onDraft(set.id, next) }
+  const record = async () => {
+    setError(''); setBusy(true)
+    try {
+      if (values.reps.trim() === '') throw new Error('Enter the actual rep count. A rep range is a target only.')
+      const parsed = measurementsSchema.parse({ actualReps: Number(values.reps), actualLoadValue: values.load === '' || values.convention === 'BODYWEIGHT' ? null : values.load, actualLoadUnit: values.load === '' || values.convention === 'BODYWEIGHT' ? null : values.unit, actualLoadConvention: values.convention || null, actualRpe: values.rpe === '' ? null : Number(values.rpe), notes: values.notes || null })
+      await onMutate({ kind: 'record', setId: set.id, measurements: parsed }); setDirty(false)
+    } catch (e) { setError((e as Error).message) } finally { setBusy(false) }
+  }
+  const peer = set.side === 'BOTH' ? undefined : session.exercises.find(e => e.id === set.sessionExerciseId)?.sets.find(s => s.setNumber === set.setNumber && s.side !== set.side && s.side !== 'BOTH')
+  const actual: Measurements | null = set.status === 'COMPLETED' ? { actualReps: set.actualReps!, actualLoadValue: set.actualLoadValue, actualLoadUnit: set.actualLoadUnit, actualLoadConvention: set.actualLoadConvention, actualRpe: set.actualRpe, notes: set.notes } : null
+  return <div id={`set-${set.id}`} className={`set-row ${set.status.toLowerCase()}`}><div className="set-heading"><strong>Set {set.setNumber}{set.side !== 'BOTH' ? ` · ${set.side.toLowerCase()}` : ''}</strong><span className="badge">{set.status === 'PENDING' ? 'Unrecorded' : set.status === 'COMPLETED' ? '✓ Completed' : 'Skipped'}{!target ? ' · Extra' : ''}</span></div>
+    <p className="target-label">Target: {target ? `${target.repsMin === target.repsMax ? target.repsMin : `${target.repsMin}–${target.repsMax}`} reps · ${loadLabel(target.loadValue, target.loadUnit, target.loadConvention)}${target.rpeMin !== null ? ` · RPE ${target.rpeMin}${target.rpeMax !== target.rpeMin ? `–${target.rpeMax}` : ''}` : ''}` : 'Extra work · no prescribed target'}</p>
+    {readonly ? <p className="actual-label">Actual: {actual ? `${actual.actualReps} reps · ${loadLabel(actual.actualLoadValue, actual.actualLoadUnit, actual.actualLoadConvention, 'load not recorded')}${actual.actualRpe !== null ? ` · RPE ${actual.actualRpe}` : ''}` : set.status === 'SKIPPED' ? 'Explicitly skipped' : 'Unrecorded'}{set.notes ? ` · ${set.notes}` : ''}</p> : <>
+      <div className="set-inputs"><label>Actual reps<input aria-label={`Actual reps for set ${set.setNumber} ${set.side.toLowerCase()}`} type="number" inputMode="numeric" min="0" max="1000" step="1" placeholder={target && target.repsMin !== target.repsMax ? `${target.repsMin}–${target.repsMax} target` : 'Reps'} value={values.reps} onChange={e => change('reps', e.target.value)} /></label><label>Load<input aria-label={`Actual load for set ${set.setNumber} ${set.side.toLowerCase()}`} type="number" inputMode="decimal" min="0" step="0.001" placeholder="Not recorded" disabled={values.convention === 'BODYWEIGHT'} value={values.load} onChange={e => change('load', e.target.value)} /></label><label>Unit<select value={values.unit} onChange={e => change('unit', e.target.value)} disabled={values.convention === 'BODYWEIGHT'}><option value="KG">kg</option><option value="LB">lb</option></select></label><button className={`confirm ${set.status === 'COMPLETED' ? 'confirmed' : ''}`} aria-label={set.status === 'COMPLETED' ? 'Save correction' : 'Confirm completed set'} onClick={record} disabled={busy}>{set.status === 'COMPLETED' ? dirty ? 'Save' : '✓' : 'Log'}</button></div>
+      <details><summary>Load convention, RPE & notes</summary><div className="details-inputs"><label>Load convention<select value={values.convention} onChange={e => change('convention', e.target.value)}><option value="">Not recorded</option><option value="TOTAL_EXTERNAL">Total external load</option><option value="PER_DUMBBELL">Per dumbbell</option><option value="ADDED">Added load</option><option value="ASSISTANCE">Assistance</option><option value="BODYWEIGHT">Bodyweight</option></select></label><label>Actual RPE · optional<input type="number" min="0" max="10" step="0.1" inputMode="decimal" value={values.rpe} onChange={e => change('rpe', e.target.value)} /></label><label>Set notes<input maxLength={2000} value={values.notes} onChange={e => change('notes', e.target.value)} /></label></div></details>
+      <div className="set-actions"><button className="text-button" onClick={() => onMutate({ kind: 'skipSet', setId: set.id, notes: values.notes || null })}>Skip set</button>{!target && set.status !== 'COMPLETED' && <button className="text-button" onClick={() => onMutate({ kind: 'removeSet', setId: set.id })}>Remove extra set</button>}{actual && peer && <button className="text-button" onClick={() => onMutate({ kind: 'record', setId: peer.id, measurements: actual })}>Copy confirmed values to {peer.side.toLowerCase()}</button>}</div>{error && <p role="alert" className="input-error">{error}</p>}
+    </>}
+  </div>
+}
+function SessionNotes({ notes, onDraft, onSave }: { notes: string; onDraft: (notes: string) => Promise<void>; onSave: (notes: string) => Promise<void> }) {
+  const [value, setValue] = useState(notes)
+  return <label className="session-notes">Session notes<textarea maxLength={2000} value={value} onChange={e => { setValue(e.target.value); void onDraft(e.target.value) }} onBlur={() => { void onSave(value) }} placeholder="Anything you want to retain about today?" /></label>
+}
+function ExercisePicker({ catalog, onCatalog, selection, onClose, onSelect }: { catalog: CatalogItem[]; onCatalog: (items: CatalogItem[]) => void; selection: { mode: 'extra' | 'substitute'; exercise?: RecordedExercise }; onClose: () => void; onSelect: (item: CatalogItem) => Promise<void> }) {
+  const [query, setQuery] = useState(''), [selected, setSelected] = useState(''), [error, setError] = useState(''), [busy, setBusy] = useState(false)
+  const search = async (value: string) => { setQuery(value); if (navigator.onLine) try { const data = await apiGet<{ exercises: CatalogItem[] }>('exercises', { query: value }); onCatalog([...new Map([...catalog, ...data.exercises].map(e => [e.id, e])).values()]) } catch { /* Exact cached identities can still be selected. */ } }
+  const create = async () => { setBusy(true); try { const e = await apiPost<CatalogItem>({ action: 'ensureExercise', name: query, operationId: crypto.randomUUID() }); onCatalog([...catalog, e]); setSelected(e.id); setError('') } catch (e) { setError((e as Error).message) } finally { setBusy(false) } }
+  return <Dialog title="picker-title" onClose={onClose}><h2 id="picker-title">{selection.mode === 'extra' ? 'Add extra exercise' : `Substitute ${selection.exercise?.nameAtRecording}`}</h2><p>Completed sets keep their original exercise. Substitution moves pending work only.</p><label>Find exercise<input autoFocus maxLength={120} value={query} onChange={e => search(e.target.value)} /></label><label>Exercise identity<select value={selected} onChange={e => setSelected(e.target.value)}><option value="">Choose an exercise</option>{catalog.filter(e => e.name.toLowerCase().includes(query.toLowerCase())).map(e => <option key={e.id} value={e.id}>{e.name}</option>)}</select></label><button className="secondary" onClick={create} disabled={!navigator.onLine || !query.trim() || busy}>Create exact name · online</button>{error && <p role="alert">{error}</p>}<button disabled={!selected || busy} onClick={() => onSelect(catalog.find(e => e.id === selected)!)}>Use this exercise</button><button className="secondary" onClick={onClose}>Cancel</button></Dialog>
+}
+function Comparison({ session }: { session: Session }) {
+  return <>{session.exercises.map(e => <div key={e.id}><strong>{e.nameAtRecording}</strong>{e.sets.map(s => <p key={s.id}>Set {s.setNumber} {s.side.toLowerCase()} · {s.status.toLowerCase()} · {s.actualReps ?? '—'} reps · {loadLabel(s.actualLoadValue, s.actualLoadUnit, s.actualLoadConvention, 'load not recorded')}</p>)}</div>)}</>
+}
+
+function Dialog({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+  const dialog = useRef<HTMLDialogElement>(null)
+  useEffect(() => { dialog.current?.showModal(); return () => dialog.current?.close() }, [])
+  return <dialog ref={dialog} className="modal" aria-labelledby={title} onCancel={onClose}>{children}</dialog>
+}

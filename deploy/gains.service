@@ -1,0 +1,22 @@
+# Template: adapt user, paths and Node binary to the VPS's existing supervision.
+[Unit]
+Description=GAINS training remote
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=gains
+Group=gains
+WorkingDirectory=/srv/gains/current
+EnvironmentFile=/etc/gains.env
+Environment=NODE_ENV=production
+Environment=HOST=127.0.0.1
+ExecStart=/usr/bin/node .output/server/index.mjs
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
