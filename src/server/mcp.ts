@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { McpServer, createMcpHandler, type CallToolResult, type Tool } from '@modelcontextprotocol/server'
 import { requireMcpAuth } from '@better-auth/mcp'
 import { auth } from './auth'
+import { scopes } from './auth-config'
 import { db } from './db'
 import { config } from './config'
 import { createWorkout, deleteWorkout, ensureExercise, exerciseHistory, getContext, getSession, getWorkout, listExercises, updateWorkout } from './store'
@@ -26,7 +27,7 @@ function createServer(userId: string, granted: string[]) {
       annotations: { readOnlyHint: !write, destructiveHint: toolName === 'delete_workout', idempotentHint: true, openWorldHint: false },
       _meta: { securitySchemes, ...(toolName === 'get_profile' ? { 'openai/profile': true } : {}) },
     }, async (args): Promise<CallToolResult> => {
-      if (!granted.includes(required)) return { isError: true, content: [{ type: 'text', text: 'Insufficient scope. Reconnect and approve the requested access.' }], _meta: { 'mcp/www_authenticate': [`Bearer resource_metadata="${config.origin}/.well-known/oauth-protected-resource/mcp", error="insufficient_scope", error_description="Additional permission required", scope="${required}"`] } }
+      if (!granted.includes(required)) return { isError: true, content: [{ type: 'text', text: 'Insufficient scope. Reconnect and approve the requested access.' }], _meta: { 'mcp/www_authenticate': [`Bearer resource_metadata="${config.resourceMetadataURL}", error="insufficient_scope", error_description="Additional permission required", scope="${required}"`] } }
       try {
         const output = JSON.parse(JSON.stringify(await run(schema.parse(args)))) as Record<string, unknown>
         return { content: [{ type: 'text', text: JSON.stringify(output) }], structuredContent: output }
@@ -53,16 +54,20 @@ function createServer(userId: string, granted: string[]) {
   return server
 }
 const protectedHandler = requireMcpAuth(auth, async (request, claims) => {
-  if (!await grantActive(claims)) return new Response(JSON.stringify({ code: 'UNAUTHENTICATED', message: 'ChatGPT access has been revoked. Reconnect to grant access.' }), { status: 401, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'WWW-Authenticate': `Bearer resource_metadata="${config.origin}/.well-known/oauth-protected-resource/mcp", error="invalid_token", error_description="Connection revoked"` } })
+  if (!await grantActive(claims)) return new Response(JSON.stringify({ jsonrpc: '2.0', id: null, error: { code: -32000, message: 'ChatGPT access has been revoked. Reconnect to grant access.' } }), { status: 401, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'WWW-Authenticate': `Bearer resource_metadata="${config.resourceMetadataURL}", error="invalid_token", error_description="Connection revoked"` } })
   if (typeof claims.sub !== 'string') throw new DomainError('UNAUTHENTICATED', 'Account required')
   rateLimit(`mcp:${claims.sub}`, 240)
   const granted = typeof claims.scope === 'string' ? claims.scope.split(' ') : []
   return createMcpHandler(() => createServer(claims.sub!, granted), { legacy: 'reject', maxRequestBodySize: 262144 }).fetch(request)
-}, { resource: config.resource, challengeScopes: ['profile:read', 'workouts:read', 'workouts:write'] })
+}, { resource: config.resource, challengeScopes: scopes })
 export async function mcpHandler(request: Request) {
   try {
     const origin = request.headers.get('origin')
     if (origin && origin !== config.origin) throw new DomainError('VALIDATION', 'Origin not allowed')
-    return await protectedHandler(request)
+    const response = await protectedHandler(request)
+    const challenge = response.headers.get('WWW-Authenticate')
+    // A tunnel audience is an identifier; discovery stays on the app origin.
+    if (challenge) response.headers.set('WWW-Authenticate', challenge.replace(/resource_metadata="[^"]*"/, `resource_metadata="${config.resourceMetadataURL}"`))
+    return response
   } catch (e) { return errorResponse(e) }
 }

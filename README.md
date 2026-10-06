@@ -54,9 +54,11 @@ Connect the HTTPS `APP_ORIGIN/mcp` URL using [OpenAI's custom MCP setup guide](h
 
 The endpoint uses SDK v2 Streamable HTTP, pinned to the stateless MCP `2026-07-28` profile. Better Auth/CIMD handles client metadata retrieval, exact registered redirects, signed OAuth context, authorization-code PKCE, refresh, and persistent signing keys. It uses the Node metadata transport's SSRF protections. No Google API token is used as an MCP bearer token.
 
+For OpenAI tunnels, set `MCP_RESOURCE_URL` to the exact OAuth resource URL requested by your ChatGPT connection, then restart the app from this checkout. Keep `APP_ORIGIN` and `BETTER_AUTH_URL` on the app/auth origin. Access tokens last five minutes; the OAuth challenge requests `offline_access` so the provider issues a refresh token. Existing connections created without that scope need a new authorization grant. Test tunnel audiences with `MCP_RESOURCE_URL=https://tunnel.example/v1/mcp/test npm test` against the disposable test database.
+
 Discovery URLs:
 
-- `/.well-known/oauth-protected-resource` and `/.well-known/oauth-protected-resource/mcp`
+- `/.well-known/oauth-protected-resource` (also available with the configured resource pathname appended)
 - `/.well-known/oauth-authorization-server/api/auth`
 - `/api/auth/.well-known/oauth-authorization-server`
 - `/api/auth/.well-known/openid-configuration`
