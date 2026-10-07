@@ -51,5 +51,5 @@ export async function api(request: Request) {
       case 'ensureExercise': return json(await ensureExercise(userId, body.name, body.operationId))
       case 'disconnect': return json(await disconnect(userId))
     }
-  } catch (e) { return errorResponse(e) }
+  } catch (e) { return errorResponse(e, `${request.method} /api/data`) }
 }

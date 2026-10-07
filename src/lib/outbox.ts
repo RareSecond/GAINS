@@ -1,6 +1,6 @@
-import { applyOperation, type QueueItem, type Session } from './domain'
+import { applyOperation, targetFor, type QueueItem, type Session } from './domain'
 export type Draft = { reps: string; load: string; unit: string; convention: string; rpe: string; notes: string }
-export type LocalSession = { userId: string; base: Session; queue: QueueItem[]; drafts: Record<string, Draft>; sessionNotesDraft?: string; conflict: Session | null; blocked: string | null }
+export type LocalSession = { userId: string; base: Session; queue: QueueItem[]; drafts: Record<string, Draft>; sessionNotesDraft?: string; rest?: { setId: string; until: number }; conflict: Session | null; blocked: string | null }
 export function projected(record: LocalSession) {
   let s = record.base
   for (const item of record.queue) s = applyOperation(s, item.operation, item.resolvedExercise)
@@ -8,8 +8,19 @@ export function projected(record: LocalSession) {
 }
 export function enqueue(record: LocalSession, item: QueueItem): LocalSession {
   if (record.conflict || record.blocked) throw new Error('Resolve the retained changes before recording more work')
-  applyOperation(projected(record), item.operation, item.resolvedExercise)
-  return { ...record, queue: [...record.queue, item] }
+  const before = projected(record)
+  applyOperation(before, item.operation, item.resolvedExercise)
+  let rest = record.rest
+  if (item.operation.kind === 'record') {
+    const setId = item.operation.setId
+    const set = before.exercises.flatMap(e => e.sets).find(s => s.id === setId)!
+    if (set.status !== 'COMPLETED') {
+      const seconds = targetFor(before, set)?.restSeconds
+      rest = seconds ? { setId, until: Date.now() + seconds * 1000 } : undefined
+    }
+  }
+  if (item.operation.kind === 'finish') rest = undefined
+  return { ...record, rest, queue: [...record.queue, item] }
 }
 export function acknowledge(record: LocalSession, operationId: string, revision: number, canonical?: Session): LocalSession {
   const head = record.queue[0]

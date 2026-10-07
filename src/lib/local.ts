@@ -45,7 +45,7 @@ export async function cacheSession(profile: Profile, id: string): Promise<LocalS
   try {
     const server = await apiGet<Session>('session', { id })
     return await editLocal<LocalSession>(key, current => {
-      if (!current || !current.queue.length) return { userId: profile.id, base: server, queue: [], drafts: current?.drafts ?? {}, sessionNotesDraft: current?.sessionNotesDraft, conflict: null, blocked: null }
+      if (!current || !current.queue.length) return { userId: profile.id, base: server, queue: [], drafts: current?.drafts ?? {}, sessionNotesDraft: current?.sessionNotesDraft, rest: current?.rest, conflict: null, blocked: null }
       return current
     })
   } catch (e) {

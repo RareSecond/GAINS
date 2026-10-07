@@ -24,6 +24,10 @@ npm run db:migrate
 npm run dev
 ```
 
+Dev and build commands regenerate Prisma Client automatically so schema changes are included. Restart a running dev server after changing the Prisma schema, since its client is cached in memory.
+
+Unexpected API/MCP errors log a request ID, operation context, error diagnostic and stack locations. The same ID is returned to the caller for log lookup. Request argument dumps, connection URLs and bearer tokens are omitted.
+
 Vite reads `.env` in development. For CLI commands Prisma reads it as well. `APP_ORIGIN` has no path or trailing slash; `BETTER_AUTH_URL` is exactly `APP_ORIGIN/api/auth`. Development loopback HTTP is supported. Google sign-in requires real Google credentials; there is no production fixture/login bypass. A missing connection gives an error, not simulated results.
 
 `DATABASE_URL` is the runtime Neon PostgreSQL connection, typically the pooled endpoint with TLS and an explicit appropriate `connection_limit`. `DIRECT_DATABASE_URL` is the migration connection. A standard VPS PostgreSQL connection works; the direct URL is an explicit operational choice. Prisma uses one client/pool per app process. Do not assume migrations are categorically prohibited on all Neon pooled URLs.
@@ -33,6 +37,8 @@ For new development migrations only: `npm run db:dev`. Committed releases use `n
 ## Recording behavior
 
 Upcoming workouts are previews. Starting creates new execution IDs, freezes the prescription in the same transaction, and leaves every set pending with null actuals. The completion button shows the reps and load it will record. Exact targets use one completion button; rep ranges show a big completion button for every count in the range. Tap +/− under adjustments for counts outside the range or corrections. Extra sets without a target require choosing a count. A user explicitly confirms each set; zero reps records a failed attempt. Loads are decimal strings, stored as `Decimal(9,3)`, with kg/lb and explicit conventions. No mixed-unit/convention totals are calculated.
+
+Each planned set may include `restSeconds` (0–3,600): null/omitted leaves rest unspecified, zero means no pause. Rest applies after that specific side-specific set; for supersets/circuits, specify the round pause on the last exercise/side. Previews and session targets show the duration. Completing a new set starts a skippable countdown when more work remains; it uses a locally retained deadline, continues offline and across reloads, and does not restart for corrections. The rest card dismisses automatically at zero. A short rest-complete beep is enabled by the completion tap, with a speaker icon toggle at the top right of the rest card. Reloading may require tapping the speaker icon again. Skipping rest cancels the beep; corrections and returning to the page do not repeat it. Browser audio may be suspended when switching apps or locking a phone, so this is not a reliable background alarm. Rest is a suggestion and never blocks recording.
 
 Groups suggest round-robin order but allow arbitrary navigation. Left/right results are independent; copying confirmed measurements is deliberate. Substitution moves pending work into a new execution exercise; performed sets keep their identity. Extra work can be added, and only extra uncompleted work can be removed. Completed sets can be corrected while active. Finish preserves pending versus skipped versus completed, permits early completion, and makes history read-only.
 

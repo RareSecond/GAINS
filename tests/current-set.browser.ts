@@ -12,6 +12,8 @@ process.env.PLAYWRIGHT_BROWSERS_PATH ??= `${process.cwd()}/.cache/browsers`
 test('current-set mobile navigation, progression, drafts, corrections and offline recording', { timeout: 60000 }, async t => {
   const now = new Date().toISOString(), id = randomUUID(), catalog = ids().map((id, i) => ({ id, name: fixtureNames[i] }))
   const plan = prescription(catalog.map(e => e.id))
+  plan.groups[2].exercises[0].sets.forEach(s => s.restSeconds = 90)
+  plan.groups[4].exercises[1].sets.forEach(s => s.restSeconds = 60)
   plan.groups[3].exercises[0].sets = [1, 2, 3, 4].map(setNumber => ({ ...plan.groups[3].exercises[0].sets[0], setNumber, repsMin: 6, repsMax: 8 }))
   const workout = { ...plan, id: randomUUID(), revision: 1, frozenAt: now, sessionId: id, url: '/', groups: plan.groups.map((g, position) => ({ ...g, id: randomUUID(), position, exercises: g.exercises.map((e, position) => ({ ...e, id: randomUUID(), position, nameAtPrescription: catalog.find(c => c.id === e.exerciseId)!.name, sets: e.sets.map(s => ({ ...s, id: randomUUID() })) })) })) }
   let session: Session = { id, status: 'ACTIVE', revision: 1, startedAt: now, finishedAt: null, updatedAt: now, asOf: now, notes: null, workout, exercises: workout.groups.flatMap(g => g.exercises).map((e, position) => { const id = randomUUID(); return { id, exerciseId: e.exerciseId, workoutExerciseId: e.id, nameAtRecording: e.nameAtPrescription, position, notes: null, sets: e.sets.map((s, position) => ({ id: randomUUID(), sessionExerciseId: id, plannedSetId: s.id, setNumber: s.setNumber, side: s.side, position, status: 'PENDING', ...blankMeasurements() })) } }) }
@@ -34,6 +36,22 @@ test('current-set mobile navigation, progression, drafts, corrections and offlin
       data = { id, revision: session.revision, session }
     } else data = action === 'profile' ? { id: 'test-athlete', name: 'Test Athlete', email: 'athlete@test.invalid', resource: '/mcp' } : action === 'exercises' ? { exercises: catalog } : session
     await route.fulfill({ json: data })
+  })
+  await page.addInitScript(() => {
+    const state = window as typeof window & { restBeeps: number }
+    state.restBeeps = 0
+    const create = AudioContext.prototype.createOscillator
+    AudioContext.prototype.createOscillator = function () {
+      const oscillator = create.call(this), start = oscillator.start.bind(oscillator)
+      oscillator.start = when => { state.restBeeps++; start(when) }
+      return oscillator
+    }
+  })
+  const beeps = () => page.evaluate(() => (window as typeof window & { restBeeps: number }).restBeeps)
+  await page.clock.install()
+  const restDeadline = () => page.evaluate(async () => {
+    const db = await new Promise<IDBDatabase>(resolve => { const r = indexedDB.open('gains-v1'); r.onsuccess = () => resolve(r.result) })
+    try { return await new Promise<number | undefined>(resolve => { const r = db.transaction('records').objectStore('records').get(`session:test-athlete:${location.pathname.split('/')[2]}`); r.onsuccess = () => resolve(r.result.rest?.until) }) } finally { db.close() }
   })
   const focus = page.getByRole('region', { name: 'Current set', exact: true })
   const adjustReps = async (count: number) => {
@@ -130,10 +148,25 @@ test('current-set mobile navigation, progression, drafts, corrections and offlin
     await confirm.click(); await focus.getByText('Set 2', { exact: true }).waitFor(); await saved()
     assert.equal(session.exercises[2].sets[0].actualReps, 8)
     assert.equal(session.workout.groups[2].exercises[0].sets[0].loadValue, '60')
+    await page.getByRole('timer').waitFor()
+    const deadline = await restDeadline()
+    await page.clock.fastForward(5000)
+    await page.reload(); await saved(false)
+    assert.equal(await restDeadline(), deadline, 'Reload must retain the rest deadline')
     await select(2, 0)
     await adjustReps(7)
     await focus.getByRole('button', { name: 'Save correction' }).click(); await saved()
     assert.equal(session.exercises[2].sets[0].actualReps, 7)
+    assert.equal(await restDeadline(), deadline, 'Correction must not restart rest')
+    await page.screenshot({ path: 'test-results/rest-timer-mobile.png', fullPage: true })
+    await page.clock.fastForward(91000)
+    await page.getByRole('region', { name: 'Rest timer' }).waitFor({ state: 'hidden' })
+    assert.equal(await restDeadline(), undefined, 'Expiry must clear the retained rest timer')
+    assert.equal(await beeps(), 1, 'Completion must play the rest alert')
+    await page.clock.fastForward(5000)
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+    assert.equal(await beeps(), 1, 'Expiry and focus must not repeat the alert')
+    await page.getByRole('region', { name: 'Rest timer' }).waitFor({ state: 'hidden' })
     await select(4)
     await focus.getByRole('button', { name: 'Confirm completed set' }).click()
     await focus.getByText('Set 1 · right', { exact: true }).waitFor(); await saved()
@@ -146,8 +179,24 @@ test('current-set mobile navigation, progression, drafts, corrections and offlin
     await page.getByRole('status').filter({ hasText: 'Offline · 1 changes retained' }).waitFor()
     await focus.getByText('Set 2 · left', { exact: true }).waitFor()
     assert.equal(session.exercises[5].sets[0].status, 'PENDING')
+    await page.getByRole('timer').waitFor()
+    const offlineDeadline = await restDeadline()
+    await page.clock.fastForward(5000)
     await context.setOffline(false); await saved()
     assert.equal(session.exercises[5].sets[0].actualReps, 5)
+    assert.equal(await restDeadline(), offlineDeadline, 'Reconnecting must not restart rest')
+    await page.getByRole('button', { name: 'Skip rest', exact: true }).click()
+    await page.getByRole('timer').waitFor({ state: 'hidden' })
+    await page.clock.fastForward(61000)
+    assert.equal(await beeps(), 1, 'Skipping rest must cancel its alert')
+    await select(5, 1)
+    await confirm.click(); await saved()
+    await page.getByRole('button', { name: 'Rest alert sound' }).click()
+    assert.equal(await page.getByRole('button', { name: 'Rest alert sound' }).getAttribute('aria-pressed'), 'false')
+    await page.clock.fastForward(61000)
+    await page.getByRole('region', { name: 'Rest timer' }).waitFor({ state: 'hidden' })
+    assert.equal(await restDeadline(), undefined, 'Expiry must clear the retained rest timer')
+    assert.equal(await beeps(), 1, 'Muted rest must finish without audio')
     await page.reload(); await saved(false)
     await page.getByText('Workout overview', { exact: false }).first().click()
     const overview = page.locator('.workout-overview')

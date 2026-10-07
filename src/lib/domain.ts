@@ -11,6 +11,7 @@ const nullable = <T extends z.ZodType>(schema: T) => schema.nullable().default(n
 const loadFields = { loadValue: nullable(mass), loadUnit: nullable(unit), loadConvention: nullable(convention) }
 export const plannedSetSchema = z.strictObject({
   setNumber: z.number().int().min(1).max(50), side, repsMin: z.number().int().min(1).max(1000), repsMax: z.number().int().min(1).max(1000),
+  restSeconds: nullable(z.number().int().min(0).max(3600).describe('Rest after this set in seconds; null is unspecified, zero means no rest. For supersets/circuits, put the round rest on the last exercise/side.')),
   ...loadFields, rpeMin: nullable(z.number().min(0).max(10).multipleOf(0.01)), rpeMax: nullable(z.number().min(0).max(10).multipleOf(0.01)),
 }).superRefine((s, ctx) => {
   if (s.repsMin > s.repsMax) ctx.addIssue({ code: 'custom', path: ['repsMax'], message: 'Maximum must be at least minimum reps' })

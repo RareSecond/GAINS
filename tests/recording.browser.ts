@@ -4,7 +4,7 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { chromium } from 'playwright'
 import { db, createUser, workout, cleanup, sessionCookie } from './db-helper'
-import { getSession, mutateSession } from '../src/server/store'
+import { getSession, mutateSession, updateWorkout } from '../src/server/store'
 import { counts } from '../src/lib/domain'
 import { measurements } from './fixture'
 import { startApp, origin } from './server-helper'
@@ -18,8 +18,12 @@ test('mobile recording, offline reload/reconnect, conflicts, finishing and accou
   const errors: string[] = []; page.on('pageerror', e => errors.push(e.message))
   try {
     const f = await workout(u.id), cookie = await sessionCookie(u.id)
+    f.prescription.groups[2].exercises[0].sets.forEach(s => s.restSeconds = 90)
+    f.prescription.groups[4].exercises[0].sets.find(s => s.setNumber === 2 && s.side === 'LEFT')!.restSeconds = 120
+    await updateWorkout(u.id, f.saved.id, 1, randomUUID(), f.prescription)
     await context.addCookies([{ ...cookie, value: encodeURIComponent(cookie.value), url: origin, httpOnly: true, sameSite: 'Lax' }])
     await page.goto(`${origin}/workouts/${f.saved.id}`)
+    await page.getByText(/Rest after set: 90 sec/).first().waitFor()
     await page.getByRole('button', { name: 'Start workout' }).click()
     await page.waitForURL('**/sessions/*')
     await page.getByRole('heading', { name: 'Workout A', exact: true }).waitFor()
@@ -63,6 +67,7 @@ test('mobile recording, offline reload/reconnect, conflicts, finishing and accou
     s = await getSession(u.id, sessionId)
     assert.equal(s.exercises[2].sets[0].actualLoadValue, '55')
     assert.equal(s.workout.groups[2].exercises[0].sets[0].loadValue, '60')
+    await page.getByRole('timer').waitFor()
     const benchCard = page.locator('.current-set .exercise-card').filter({ has: page.getByRole('heading', { name: 'Bench press', exact: true }) })
     await benchCard.getByText('Exercise options', { exact: true }).click()
     await benchCard.getByRole('button', { name: 'Substitute', exact: true }).click()
@@ -99,8 +104,10 @@ test('mobile recording, offline reload/reconnect, conflicts, finishing and accou
     await page.locator(`#current-set-${secondLeft.id}`).getByRole('spinbutton', { name: /Actual load/ }).fill('18.5')
     await page.locator(`#current-set-${secondLeft.id}`).getByRole('button', { name: 'Confirm completed set' }).click()
     await page.getByRole('status').filter({ hasText: 'Offline · 1 changes retained' }).waitFor()
+    await page.getByRole('timer').waitFor()
     await page.reload({ waitUntil: 'domcontentloaded' })
     await page.getByRole('heading', { name: 'Workout A', exact: true }).waitFor()
+    await page.getByRole('timer').waitFor()
     await selectSet(secondLeft.id)
     assert.match(await page.locator(`#current-set-${secondLeft.id}`).getByRole('button', { name: 'Save correction' }).innerText(), /5 reps/)
     assert.equal((await getSession(u.id, sessionId)).exercises[4].sets.find(x => x.id === secondLeft.id)!.status, 'PENDING')

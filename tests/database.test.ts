@@ -95,3 +95,23 @@ dbTest('actual overrides, retries, substitutions, extras, unilateral differences
     try { const next = await workout(extraUser.id), st = await startSession(extraUser.id, next.saved.id, randomUUID()); await assert.rejects(() => mutateSession(extraUser.id, st.id, { operationId: randomUUID(), expectedRevision: 1, operation: { kind: 'addExercise', exerciseId: next.catalog[8].id, newExerciseRowId: extraRow, notes: null } }), /unavailable/) } finally { await cleanup([extraUser.id]) }
   } finally { await cleanup([u.id, other.id]) }
 })
+
+
+dbTest('rest targets persist through replacement, frozen sessions and exercise history', async () => {
+  const u = await createUser()
+  try {
+    const f = await workout(u.id)
+    f.prescription.groups[2].exercises[0].sets[0].restSeconds = 90
+    await updateWorkout(u.id, f.saved.id, 1, randomUUID(), f.prescription)
+    const w = await getWorkout(u.id, f.saved.id)
+    const target = w.groups[2].exercises[0].sets[0]
+    assert.equal(target.restSeconds, 90)
+    assert.equal(w.groups[0].exercises[0].sets[0].restSeconds, null)
+    await assert.rejects(() => db.plannedSet.update({ where: { id: target.id }, data: { restSeconds: -1 } }))
+    const started = await startSession(u.id, w.id, randomUUID()), s = await getSession(u.id, started.id)
+    assert.equal(s.workout.groups[2].exercises[0].sets[0].restSeconds, 90)
+    await mutateSession(u.id, s.id, { operationId: randomUUID(), expectedRevision: 1, operation: { kind: 'record', setId: s.exercises[2].sets[0].id, measurements: measurements() } })
+    const history = await exerciseHistory(u.id, f.catalog[2].id) as { sets: { plannedSet: { restSeconds: number | null } }[] }
+    assert.ok(history.sets.some(s => s.plannedSet.restSeconds === 90))
+  } finally { await cleanup([u.id]) }
+})

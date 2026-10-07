@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
-import { applyOperation, blankMeasurements, counts, executionOrder, loadLabel, measurementsSchema, prescriptionSchema, type Session } from '../src/lib/domain'
+import { applyOperation, blankMeasurements, counts, executionOrder, loadLabel, measurementsSchema, plannedSetSchema, prescriptionSchema, type Session } from '../src/lib/domain'
 import { acknowledge, enqueue, projected, reapply, type LocalSession } from '../src/lib/outbox'
 import { ids, measurements, prescription } from './fixture'
 function session(p = prescription(ids())): Session {
@@ -73,4 +73,33 @@ test('three-exercise circuit drops exhausted slots and preserves all load conven
   assert.deepEqual(conventions.map(c => loadLabel('20.125', 'KG', c)), ['20.125 kg · assistance', '20.125 kg · per dumbbell', '20.125 kg · added'])
   assert.equal(loadLabel(null, null, 'BODYWEIGHT'), 'bodyweight')
   assert.equal(loadLabel(null, null, 'TOTAL_EXTERNAL', 'load not recorded'), 'load not recorded · total')
+})
+
+
+test('rest targets and retained countdown survive acknowledgement and corrections', t => {
+  const p = prescription(ids()), target = p.groups[0].exercises[0].sets[0]
+  assert.equal(target.restSeconds, null)
+  for (const restSeconds of [0, 90, 3600]) assert.equal(plannedSetSchema.parse({ ...target, restSeconds }).restSeconds, restSeconds)
+  for (const restSeconds of [-1, 1.5, 3601, '90', Infinity]) assert.throws(() => plannedSetSchema.parse({ ...target, restSeconds }))
+  target.restSeconds = 90
+  p.groups[1].exercises[0].sets[0].restSeconds = 0
+  const base = session(p), setId = base.exercises[0].sets[0].id
+  let now = 100_000
+  t.mock.method(Date, 'now', () => now)
+  const record = (setId: string) => ({ operationId: randomUUID(), expectedRevision: 1, operation: { kind: 'record' as const, setId, measurements: measurements() } })
+  let r = enqueue({ userId: 'user', base, queue: [], drafts: {}, conflict: null, blocked: null }, record(setId))
+  assert.deepEqual(r.rest, { setId, until: 190_000 })
+  r = structuredClone(r) // IndexedDB reload retains the deadline, not a ticking counter.
+  now += 30_000
+  r = acknowledge(r, r.queue[0].operationId, 2)
+  assert.equal(r.rest?.until, 190_000)
+  r = enqueue(r, record(setId)) // Correcting a completed set must not restart rest.
+  assert.equal(r.rest?.until, 190_000)
+  r = enqueue(r, { operationId: randomUUID(), expectedRevision: 3, operation: { kind: 'skipSet', setId: base.exercises[1].sets[1].id, notes: null } })
+  assert.equal(r.rest?.until, 190_000)
+  const paused = r
+  r = enqueue(r, record(base.exercises[1].sets[0].id))
+  assert.equal(r.rest, undefined) // Explicit zero starts no timer.
+  assert.equal(enqueue(paused, record(base.exercises[2].sets[0].id)).rest, undefined) // Unspecified rest starts no timer.
+  assert.equal(enqueue(paused, { operationId: randomUUID(), expectedRevision: 4, operation: { kind: 'finish', notes: null } }).rest, undefined)
 })

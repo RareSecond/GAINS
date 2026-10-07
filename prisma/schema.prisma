@@ -390,6 +390,7 @@ model PlannedSet {
   loadConvention    LoadConvention?
   rpeMin            Decimal?        @db.Decimal(4, 2)
   rpeMax            Decimal?        @db.Decimal(4, 2)
+  restSeconds       Int?
   executions        SessionSet[]
 
   @@unique([workoutExerciseId, setNumber, side])

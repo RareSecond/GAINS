@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { Volume2, VolumeX } from 'lucide-react'
 import { counts, executionOrder, loadLabel, loadLabels, measurementsSchema, targetFor, type Measurements, type Operation, type RecordedExercise, type RecordedSet, type Session } from './lib/domain'
 import { apiGet, apiPost, ApiError } from './lib/api-client'
 import { cacheSession, editLocal, readLocal, sessionKey, syncSession, watchLocal, type Profile } from './lib/local'
@@ -10,6 +11,36 @@ export function Recorder({ profile, id }: { profile: Profile; id: string }) {
   const [record, setRecord] = useState<LocalSession>(), [error, setError] = useState(''), [storageError, setStorageError] = useState(''), [saving, setSaving] = useState(false), [offline, setOffline] = useState(!navigator.onLine)
   const [catalog, setCatalog] = useState<CatalogItem[]>([]), [selection, setSelection] = useState<{ mode: 'extra' | 'substitute'; exercise?: RecordedExercise }>(), [finish, setFinish] = useState(false)
   const [selectedSetId, setSelectedSetId] = useState<string>(), [overviewOpen, setOverviewOpen] = useState(false)
+  const audio = useRef<AudioContext | null>(null)
+  const [soundEnabled, setSoundEnabled] = useState(true), [soundReady, setSoundReady] = useState(false)
+  const enableSound = () => {
+    try {
+      const context = audio.current ??= new AudioContext()
+      const update = () => { if (audio.current === context) setSoundReady(context.state === 'running') }
+      context.onstatechange = update
+      void context.resume().then(update).catch(() => setSoundReady(false))
+      update()
+    } catch { setSoundReady(false) }
+  }
+  const beep = () => {
+    if (!soundEnabled) return
+    const context = audio.current
+    if (!context || context.state !== 'running') { setSoundReady(false); return }
+    try {
+      const oscillator = context.createOscillator(), gain = context.createGain(), now = context.currentTime
+      oscillator.frequency.value = 880
+      gain.gain.setValueAtTime(0, now)
+      gain.gain.linearRampToValueAtTime(0.15, now + 0.02)
+      gain.gain.linearRampToValueAtTime(0, now + 0.45)
+      oscillator.connect(gain); gain.connect(context.destination)
+      oscillator.onended = () => { oscillator.disconnect(); gain.disconnect() }
+      oscillator.start(now); oscillator.stop(now + 0.45)
+    } catch { setSoundReady(false) }
+  }
+  useEffect(() => {
+    setSoundReady(false)
+    return () => { if (audio.current) { audio.current.onstatechange = null; void audio.current.close().catch(() => {}); audio.current = null } }
+  }, [key])
   const alive = useRef(true)
   const synchronize = async () => {
     if (!alive.current) return
@@ -39,6 +70,8 @@ export function Recorder({ profile, id }: { profile: Profile; id: string }) {
     return () => { alive.current = false; stop(); window.removeEventListener('online', resume); window.removeEventListener('offline', disconnected); window.removeEventListener('focus', resume) }
   }, [key])
   const mutate = async (operation: Operation, resolvedExercise?: CatalogItem) => {
+    // Unlock audio synchronously in the completion tap, before the IndexedDB write.
+    if (operation.kind === 'record' && soundEnabled) enableSound()
     setError(''); setSaving(true)
     try {
       const result = await editLocal<LocalSession>(key, current => {
@@ -65,11 +98,14 @@ export function Recorder({ profile, id }: { profile: Profile; id: string }) {
     try {
       const result = await editLocal<LocalSession>(key, r => {
         if (!r) return r
-        if (keepServer) return { ...r, base: r.conflict ?? r.base, queue: [], drafts: {}, sessionNotesDraft: undefined, conflict: null, blocked: null }
+        if (keepServer) return { ...r, base: r.conflict ?? r.base, queue: [], drafts: {}, sessionNotesDraft: undefined, rest: undefined, conflict: null, blocked: null }
         return reapply(r)
       })
       setRecord(result); setError(''); if (!keepServer) void synchronize()
     } catch (e) { setError(`These local changes cannot be reapplied: ${(e as Error).message}. They remain retained.`) }
+  }
+  const dismissRest = async (until: number) => {
+    try { await editLocal<LocalSession>(key, r => r?.rest?.until === until ? { ...r, rest: undefined } : r) } catch { setStorageError('Local retention unavailable. Rest timer could not be dismissed.') }
   }
   if (!record) return <p role={error ? 'alert' : undefined}>{error || 'Opening your session…'}</p>
   let session: Session
@@ -91,6 +127,10 @@ export function Recorder({ profile, id }: { profile: Profile; id: string }) {
     {(record.conflict || record.blocked) && <section className="notice warning"><h2>Your changes need attention</h2><p>{record.blocked ?? 'Another device changed this session. Your local entries are retained below.'}</p>{record.conflict && <><p>Server revision {record.conflict.revision} · {record.conflict.status.toLowerCase()} · {JSON.stringify(counts(record.conflict))}</p><details><summary>Compare server and retained local records</summary><div className="comparison"><div><h3>Server</h3><Comparison session={record.conflict} /></div><div><h3>Your retained version</h3><Comparison session={session} /></div></div></details></>}
       <button className="secondary" onClick={() => resolve(true)}>Use server version · discard retained edits</button>{record.conflict?.status === 'ACTIVE' && <button onClick={() => resolve(false)}>Reapply compatible local changes</button>}<button className="secondary" onClick={() => { const url = URL.createObjectURL(new Blob([JSON.stringify(record, null, 2)], { type: 'application/json' })); const a = document.createElement('a'); a.href = url; a.download = 'gains-retained-changes.json'; a.click(); URL.revokeObjectURL(url) }}>Export retained changes</button>
     </section>}
+    {active && next && record.rest && !record.conflict && !record.blocked && order.some(s => s.id === record.rest!.setId && s.status === 'COMPLETED') && <RestTimer until={record.rest.until} onComplete={alert => { if (alert) beep(); void dismissRest(record.rest!.until) }} sound={soundEnabled && soundReady} onSound={() => {
+      if (soundEnabled && soundReady) setSoundEnabled(false)
+      else { setSoundEnabled(true); enableSound() }
+    }} onSkip={() => dismissRest(record.rest!.until)} />}
     {active && current && currentExercise && <section className="current-set" aria-label="Current set">
       <div className="focus-navigation"><p className="eyebrow">{current.status === 'PENDING' ? 'YOUR CURRENT SET' : 'REVIEW SET'}</p><label>Exercise<select aria-label="Choose exercise" value={currentExercise.id} onChange={event => { const e = session.exercises.find(e => e.id === event.target.value)!; openSet((e.sets.find(s => s.status === 'PENDING') ?? e.sets[0]).id) }}>{session.exercises.filter(e => e.sets.length).map(e => <option key={e.id} value={e.id}>{e.nameAtRecording}</option>)}</select></label></div>
       <ExerciseCard key={currentExercise.id} exercise={currentExercise} session={session} readonly={readonly} drafts={record.drafts} onDraft={draft} onMutate={mutate} onSubstitute={() => setSelection({ mode: 'substitute', exercise: currentExercise })} focusSet={current} />
@@ -108,6 +148,30 @@ export function Recorder({ profile, id }: { profile: Profile; id: string }) {
     {finish && <Dialog title="finish-title" onClose={() => setFinish(false)}><h2 id="finish-title">Finish this session?</h2><p>{totals.completed} completed · {totals.skipped} skipped · {totals.unrecorded} unrecorded</p><p>Unrecorded work stays unrecorded. Completed history becomes read-only.</p><p>{record.queue.length ? `${record.queue.length} preceding changes must synchronize first.` : 'All preceding entries are saved.'}{offline ? ' Finish will be retained locally until you reconnect.' : ''}</p><button onClick={async () => { await mutate({ kind: 'finish', notes: record.sessionNotesDraft ?? session.notes }); setFinish(false) }}>Finish workout</button><button className="secondary" autoFocus onClick={() => setFinish(false)}>Keep training</button></Dialog>}
     {selection && <ExercisePicker catalog={catalog} onCatalog={setCatalog} selection={selection} onClose={() => setSelection(undefined)} onSelect={async e => { await mutate(selection.mode === 'extra' ? { kind: 'addExercise', exerciseId: e.id, newExerciseRowId: crypto.randomUUID(), notes: null } : { kind: 'substitute', exerciseRowId: selection.exercise!.id, exerciseId: e.id, newExerciseRowId: crypto.randomUUID(), notes: null }, e); setSelection(undefined) }} />}
   </div>
+}
+function RestTimer({ until, onSkip, onComplete, sound, onSound }: { until: number; onSkip: () => Promise<void>; onComplete: (alert: boolean) => void; sound: boolean; onSound: () => void }) {
+  const [now, setNow] = useState(Date.now)
+  const notified = useRef<number | null>(null), openedAt = useRef(Date.now()), complete = useRef(onComplete)
+  complete.current = onComplete
+  useEffect(() => {
+    const tick = () => {
+      const now = Date.now(); setNow(now)
+      if (now >= until) {
+        window.clearInterval(timer)
+        if (notified.current !== until) { notified.current = until; complete.current(until > openedAt.current) }
+      }
+    }
+    const timer = window.setInterval(tick, 1000)
+    tick()
+    window.addEventListener('focus', tick); document.addEventListener('visibilitychange', tick)
+    return () => { window.clearInterval(timer); window.removeEventListener('focus', tick); document.removeEventListener('visibilitychange', tick) }
+  }, [until])
+  const seconds = Math.max(0, Math.ceil((until - now) / 1000))
+  return <section className={`rest-timer${seconds > 0 ? ' resting' : ''}`} aria-label="Rest timer">
+    <button className="rest-sound" aria-label="Rest alert sound" aria-pressed={sound} title={sound ? 'Mute rest alert' : 'Enable rest alert sound'} onClick={onSound}>{sound ? <Volume2 size={20} aria-hidden="true" /> : <VolumeX size={20} aria-hidden="true" />}</button>
+    {seconds > 0 ? <><h2>Resting</h2><strong role="timer" aria-live="off" aria-label={`${seconds} seconds remaining`}>{Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, '0')}</strong><p className="rest-caption">Rest time remaining<span>minutes : seconds</span></p></> : <p role="status">Rest complete · ready for your next set</p>}
+    <button className="secondary full" onClick={onSkip}>{seconds > 0 ? 'Skip rest' : 'Dismiss'}</button>
+  </section>
 }
 function ExerciseCard({ exercise: e, session, readonly, drafts, onDraft, onMutate, onSubstitute, focusSet, onSelectSet }: { focusSet?: RecordedSet; onSelectSet?: (id: string) => void; exercise: RecordedExercise; session: Session; readonly: boolean; drafts: Record<string, Draft>; onDraft: (id: string, values: Draft) => Promise<void>; onMutate: (op: Operation) => Promise<void>; onSubstitute: () => void }) {
   const planned = session.workout.groups.flatMap(g => g.exercises).find(p => p.id === e.workoutExerciseId)
@@ -142,7 +206,7 @@ function SetRow({ set, session, draft, readonly, onDraft, onMutate, focused = fa
   const peer = set.side === 'BOTH' ? undefined : session.exercises.find(e => e.id === set.sessionExerciseId)?.sets.find(s => s.setNumber === set.setNumber && s.side !== set.side && s.side !== 'BOTH')
   const actual: Measurements | null = set.status === 'COMPLETED' ? { actualReps: set.actualReps!, actualLoadValue: set.actualLoadValue, actualLoadUnit: set.actualLoadUnit, actualLoadConvention: set.actualLoadConvention, actualRpe: set.actualRpe, notes: set.notes } : null
   return <div id={`${focused ? 'current-set' : 'set'}-${set.id}`} className={`set-row ${set.status.toLowerCase()}`}><div className="set-heading"><strong>Set {set.setNumber}{set.side !== 'BOTH' ? ` · ${set.side.toLowerCase()}` : ''}</strong><span className="badge">{set.status === 'PENDING' ? 'Unrecorded' : set.status === 'COMPLETED' ? '✓ Completed' : 'Skipped'}{!target ? ' · Extra' : ''}</span></div>
-    {focused && target ? <div className="focus-targets"><div><span>TARGET REPS</span><strong>{target.repsMin === target.repsMax ? target.repsMin : `${target.repsMin}–${target.repsMax}`}</strong></div><div><span>TARGET LOAD</span><strong>{target.loadConvention === 'BODYWEIGHT' ? 'Bodyweight' : target.loadValue === null ? '—' : <>{target.loadValue}<small> {target.loadUnit?.toLowerCase()}</small></>}</strong><span>{target.loadConvention && target.loadConvention !== 'BODYWEIGHT' ? loadLabels[target.loadConvention] : ''}</span></div>{target.rpeMin !== null && <p>Target RPE {target.rpeMin}{target.rpeMax !== target.rpeMin ? `–${target.rpeMax}` : ''}</p>}</div> : <p className="target-label">Target: {target ? `${target.repsMin === target.repsMax ? target.repsMin : `${target.repsMin}–${target.repsMax}`} reps · ${loadLabel(target.loadValue, target.loadUnit, target.loadConvention)}${target.rpeMin !== null ? ` · RPE ${target.rpeMin}${target.rpeMax !== target.rpeMin ? `–${target.rpeMax}` : ''}` : ''}` : 'Extra work · no prescribed target'}</p>}
+    {focused && target ? <div className="focus-targets"><div><span>TARGET REPS</span><strong>{target.repsMin === target.repsMax ? target.repsMin : `${target.repsMin}–${target.repsMax}`}</strong></div><div><span>TARGET LOAD</span><strong>{target.loadConvention === 'BODYWEIGHT' ? 'Bodyweight' : target.loadValue === null ? '—' : <>{target.loadValue}<small> {target.loadUnit?.toLowerCase()}</small></>}</strong><span>{target.loadConvention && target.loadConvention !== 'BODYWEIGHT' ? loadLabels[target.loadConvention] : ''}</span></div>{target.restSeconds != null && <p>Rest after set: {target.restSeconds} sec</p>}{target.rpeMin !== null && <p>Target RPE {target.rpeMin}{target.rpeMax !== target.rpeMin ? `–${target.rpeMax}` : ''}</p>}</div> : <p className="target-label">Target: {target ? `${target.repsMin === target.repsMax ? target.repsMin : `${target.repsMin}–${target.repsMax}`} reps · ${loadLabel(target.loadValue, target.loadUnit, target.loadConvention)}${target.rpeMin !== null ? ` · RPE ${target.rpeMin}${target.rpeMax !== target.rpeMin ? `–${target.rpeMax}` : ''}` : ''}${target.restSeconds != null ? ` · Rest after set: ${target.restSeconds} sec` : ''}` : 'Extra work · no prescribed target'}</p>}
     {readonly ? <p className="actual-label">Actual: {actual ? `${actual.actualReps} reps · ${loadLabel(actual.actualLoadValue, actual.actualLoadUnit, actual.actualLoadConvention, 'load not recorded')}${actual.actualRpe !== null ? ` · RPE ${actual.actualRpe}` : ''}` : set.status === 'SKIPPED' ? 'Explicitly skipped' : 'Unrecorded'}{set.notes ? ` · ${set.notes}` : ''}</p> : <>
       {ranged ? <><p className="range-prompt">Complete set · choose your reps</p><div className="rep-options" role="group" aria-label="Complete set with actual reps">{Array.from({ length: target.repsMax - target.repsMin + 1 }, (_, i) => target.repsMin + i).map(n => <button key={n} className="confirm tap-confirm" aria-label={`Complete set with ${n} reps`} onClick={() => record(String(n))} disabled={busy}><strong>{n}</strong><span>reps</span></button>)}</div><p className="range-load">{loadLabel(values.load || null, values.unit, (values.convention || null) as Measurements['actualLoadConvention'], 'load not recorded')}</p></> : <button className={`confirm full tap-confirm ${set.status === 'COMPLETED' ? 'confirmed' : ''}`} aria-label={set.status === 'COMPLETED' ? 'Save correction' : 'Confirm completed set'} onClick={() => record()} disabled={busy}><strong>{set.status === 'COMPLETED' ? 'Save correction' : 'Complete set'}</strong><span>{reps === '' ? 'Choose reps below' : `${reps} reps`} · {loadLabel(values.load || null, values.unit, (values.convention || null) as Measurements['actualLoadConvention'], 'load not recorded')}</span></button>}
       <details className="recording-adjustments"><summary>Adjust reps, load & details</summary>

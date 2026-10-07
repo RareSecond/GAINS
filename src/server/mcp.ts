@@ -32,7 +32,7 @@ function createServer(userId: string, granted: string[]) {
         const output = JSON.parse(JSON.stringify(await run(schema.parse(args)))) as Record<string, unknown>
         return { content: [{ type: 'text', text: JSON.stringify(output) }], structuredContent: output }
       } catch (e) {
-        const response = errorResponse(e); const error = await response.json()
+        const response = errorResponse(e, `mcp:${toolName}`); const error = await response.json()
         return { isError: true, content: [{ type: 'text', text: JSON.stringify(error) }] }
       }
     })
@@ -69,5 +69,5 @@ export async function mcpHandler(request: Request) {
     // A tunnel audience is an identifier; discovery stays on the app origin.
     if (challenge) response.headers.set('WWW-Authenticate', challenge.replace(/resource_metadata="[^"]*"/, `resource_metadata="${config.resourceMetadataURL}"`))
     return response
-  } catch (e) { return errorResponse(e) }
+  } catch (e) { return errorResponse(e, 'mcp:transport') }
 }
