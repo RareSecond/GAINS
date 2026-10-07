@@ -103,7 +103,7 @@ Integration tests refuse non-test database names. They create unique test-owned 
 
 The representative fixture covers optional jumps, exact-rep/no-load squat/RPE range, loaded bench, pull-up rep range, single-leg RDL/row superset, and side-specific core/back-extension work. A second fixture checks three-exercise circuit traversal with exhausted slots and assistance/per-dumbbell/added loads. Tests include overrides, substitutions after completed work, extra sets/exercises, explicit skips, side mismatches, and early completion. The browser test saves `test-results/mobile-recording.png` and exercises offline reload, reconnect, conflict/reapply, account switching, and offline finish. The local auth test uses real provider PKCE issuance and real SDK calls; it is not a ChatGPT live connection.
 
-## Build and VPS release
+## Standalone host reference
 
 ```sh
 npm ci --cache .cache/npm
@@ -114,11 +114,11 @@ npm run db:migrate
 npm start
 ```
 
-`npm start` loads `.env` and runs the long-lived Node output; `PORT` selects the port. Set `HOST=127.0.0.1` behind the proxy and `NODE_ENV=production`. Production requires HTTPS and real configured Google/Better Auth secrets. Keep the environment file outside web-served directories. Build output excludes test code and there is no deployment automation that changes infrastructure.
+`npm start` loads `.env` when present and runs the long-lived Node output; `PORT` selects the port. Set `HOST=127.0.0.1` behind the proxy and `NODE_ENV=production`. Production requires HTTPS and real configured Google/Better Auth secrets. Keep the environment file outside web-served directories. Build output excludes test code. For the codictive VPS, use the Docker/Phase deployment below instead of these standalone templates.
 
 Reuse the VPS's existing supervisor and HTTPS reverse proxy. `deploy/gains.service` and `deploy/nginx.conf` are templates to adapt to those conventions. The proxy overwrites trusted headers, disables response buffering/caching for streaming, forwards all discovery/auth/MCP paths, and restricts body size. Google callbacks and ChatGPT discovery must resolve at the same public origin. Preserve Prisma's platform-specific generated engine and deploy `.output`, `prisma`, package/lock files and the matching independent installation.
 
-For each release: take/verify a backup, build/test in a new release directory, apply committed migrations once using the migration URL, verify `/health` readiness and discovery, then switch the existing release symlink/restart the app. Migration failure blocks the release switch. Keep the previous application release for rollback, but do not pretend application rollback automatically reverses a database migration. None of these production actions are authorized by implementing the spec.
+For each release: take/verify a backup, build/test in a new release directory, apply committed migrations once using the migration URL, verify `/health` readiness and discovery, then switch the existing release symlink/restart the app. Migration failure blocks the release switch. Keep the previous application release for rollback, but do not pretend application rollback automatically reverses a database migration. The codictive workflow below automates migrations and application activation after its infrastructure has been provisioned.
 
 ## Backup and live acceptance
 
@@ -126,6 +126,116 @@ Record the actual development/production Neon branch names, plan, point-in-time 
 
 Practice restore into a separate empty branch/database with `pg_restore --no-owner --no-acl`, run migrations/readiness checks, and verify workout/session counts and a sample comparison before any traffic switch. Use the actual plan's point-in-time restore workflow when available. Do not restore over production without explicit operator authorization.
 
-Live inputs still needed: real development/production domain, Google OAuth clients/callbacks, Neon connections and retention settings, ChatGPT custom MCP access, and VPS access/process/proxy conventions. With those supplied, run the manual loop in the original spec: Google sign-in and return, same-account ChatGPT linking, workout create/open/record, network disconnect/reload/reconnect, early finish, ChatGPT comparison/history, second-account isolation, then disconnect and confirm existing token rejection. Local tests do not verify Google, ChatGPT account linking, Neon hosting, public HTTPS, or VPS deployment.
+Live inputs still needed: Google OAuth clients/callbacks, Neon connections and retention settings, and ChatGPT custom MCP access. With those supplied, run the manual loop in the original spec: Google sign-in and return, same-account ChatGPT linking, workout create/open/record, network disconnect/reload/reconnect, early finish, ChatGPT comparison/history, second-account isolation, then disconnect and confirm existing token rejection. Local tests do not verify Google, ChatGPT account linking, Neon hosting, public HTTPS, or VPS deployment.
 
 Official implementation references: [TanStack Start hosting](https://tanstack.com/start/latest/docs/framework/react/guide/hosting), [Better Auth MCP](https://better-auth.com/docs/plugins/mcp), [OAuth provider](https://better-auth.com/docs/plugins/oauth-provider), [OpenAI authentication/profile contract](https://developers.openai.com/plugins/build/auth), [Prisma transactions](https://www.prisma.io/docs/orm/prisma-client/queries/transactions), [Neon Prisma guide](https://neon.com/docs/guides/prisma).
+
+## Deploying to codictive with Phase
+
+Production is `https://gains.codictive.be`; the existing wildcard DNS points at
+codictive's VPS. No new DNS record is needed. The codictive repository owns the
+Caddy route, private `codictive_edge` network and `/srv/apps/gains/compose.yml`.
+The old systemd/nginx files above are reference templates for a standalone host;
+the codictive deployment uses Docker and Caddy.
+
+### Phase configuration
+
+Create a Phase app named `gains` with separate development and production
+environments. Populate `DATABASE_URL`, `DIRECT_DATABASE_URL`,
+`BETTER_AUTH_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `APP_ORIGIN`
+and `BETTER_AUTH_URL` from `.env.example`, using different database destinations
+and auth secrets for the two environments. Generate each auth secret with
+`openssl rand -base64 48`. Keep Google and database credentials directly in Phase.
+
+Production values include:
+
+```text
+APP_ORIGIN=https://gains.codictive.be
+BETTER_AUTH_URL=https://gains.codictive.be/api/auth
+NODE_ENV=production
+HOST=0.0.0.0
+PORT=3000
+```
+
+Do not set `MCP_RESOURCE_URL` for the normal public deployment; its default is
+`APP_ORIGIN/mcp`. It is only needed when a tunnel requires a different audience.
+Configure Google's authorized JavaScript origin as `https://gains.codictive.be`
+and its exact redirect as `https://gains.codictive.be/api/auth/callback/google`.
+Development uses `http://localhost:3000` and the matching development callback.
+
+Authenticate locally with `phase auth`, then use:
+
+```sh
+npm ci --cache .cache/npm
+npm run db:migrate:phase
+npm run dev:phase
+# For a built local server:
+npm run build
+npm run start:phase
+```
+
+These scripts default to `gains/development`. `PHASE_APP` and `PHASE_ENV` can
+override the context. Runtime credentials are injected with `phase run`; no
+`.env` file is required. The container uses the same wrapper with
+`PHASE_ENV=production` and a mounted service token. Self-hosted Phase can use
+`PHASE_HOST` both locally and in the codictive/GitHub configuration.
+
+Reuse the existing service token and grant its service account read access to
+both `codictive/production` and `gains/production`. Codictive's Ansible role uses
+the infrastructure runner's `PHASE_SERVICE_TOKEN` directly and writes it to a
+UID 1000-owned, mode 0400 file without logging its contents. No duplicate token
+secret in Phase is needed. The VPS needs this token so containers can fetch
+secrets on every start or restart, independently of GitHub Actions.
+After rotating the token, update the GitHub `PHASE_SERVICE_TOKEN` secrets,
+rerun codictive provisioning, then rerun the application deploy workflow.
+For first setup or token rotation locally, export `PHASE_SERVICE_TOKEN` before
+`make gains`. Changes to app secrets only require rerunning the application
+workflow to fetch fresh values.
+
+### First deployment
+
+1. Publish this GAINS repository to GitHub if it has no remote yet. The default
+   branch must be `main` for `.github/workflows/deploy.yml` to deploy.
+2. In GAINS's GitHub repository, create a `production` environment and add
+   `PHASE_SERVICE_TOKEN`: the existing token with read-only access to both
+   **codictive/production** and **gains/production**. Optional variables:
+   `INFRA_PHASE_APP` and `PHASE_HOST`.
+3. Grant the service account access to GAINS before merging the codictive
+   changes. Its infrastructure workflow provisions GAINS and its Caddy route. Alternatively,
+   from the codictive checkout, use `make gains && make proxy` after the VPS's
+   base Docker/Caddy setup has converged.
+4. Verify the production database's backup/restore setup before the first
+   migration. Push/merge GAINS's code to `main`, or manually run its deploy
+   workflow on `main` after the infrastructure is ready.
+5. Verify `https://gains.codictive.be/health`, Google sign-in, recording, and the
+   ChatGPT connection to `https://gains.codictive.be/mcp`.
+
+The workflow builds Linux amd64 Node 24 images and checks TypeScript. Builds
+receive no app secrets. It packs app and migration images into a one-day GitHub
+artifact, then uploads it over host-key-verified SSH using temporary credentials.
+PRs build only; production deploys are serialized. No tests are added or run by
+this workflow, and no image-registry credentials are needed.
+
+The VPS helper loads the images, runs `prisma migrate deploy`, recreates the app,
+and waits up to 180 seconds for its database-backed `/health` readiness check.
+A migration failure leaves the running app alone. Failed app readiness restores
+the previous application image when available. Neither case reverses migrations.
+The job also checks public HTTPS readiness after activation.
+
+As root on the VPS, inspect or roll back with:
+
+```sh
+/usr/local/sbin/gains-release rollback
+```
+
+Compose operations require `GAINS_RELEASE` to be set to the SHA in
+`/srv/apps/gains/current`; the release helper sets it automatically. For logs:
+
+```sh
+GAINS_RELEASE="$(cat /srv/apps/gains/current)" docker compose -f /srv/apps/gains/compose.yml logs --tail 100 app
+```
+
+Retain the current and previous `gains`/`gains-migrate` images when cleaning up
+Docker storage. Only remove obsolete images after successful activation; do not
+run a blanket prune that removes rollback images. Application rollback requires
+that the previous version is compatible with the migrated database.

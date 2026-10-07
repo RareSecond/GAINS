@@ -1,0 +1,64 @@
+name: Deploy GAINS
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build application and migration images
+        run: |
+          set -euo pipefail
+          docker build --platform linux/amd64 --target app -t "gains:$GITHUB_SHA" .
+          docker build --platform linux/amd64 --target migrate -t "gains-migrate:$GITHUB_SHA" .
+      - name: Bundle the release
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        run: |
+          set -euo pipefail
+          docker save "gains:$GITHUB_SHA" "gains-migrate:$GITHUB_SHA" | gzip > gains-release.tar.gz
+      - uses: actions/upload-artifact@v4
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        with:
+          name: gains-release
+          path: gains-release.tar.gz
+          compression-level: 0
+          retention-days: 1
+
+  deploy:
+    needs: build
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    concurrency:
+      group: gains-production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: gains-release
+      - name: Install Phase CLI
+        run: |
+          set -euo pipefail
+          curl -fsSL https://pkg.phase.dev/install.sh -o /tmp/install-phase.sh
+          sh /tmp/install-phase.sh --version 2.3.2
+      - name: Deploy using infrastructure credentials from Phase
+        env:
+          PHASE_SERVICE_TOKEN: ${{ secrets.PHASE_SERVICE_TOKEN }}
+          PHASE_HOST: ${{ vars.PHASE_HOST }}
+          INFRA_PHASE_APP: ${{ vars.INFRA_PHASE_APP || 'codictive' }}
+          DEPLOY_URL: https://gains.codictive.be
+        run: |
+          set -euo pipefail
+          : "${PHASE_SERVICE_TOKEN:?Set PHASE_SERVICE_TOKEN in the production environment}"
+          phase run --app "$INFRA_PHASE_APP" --env production "bash deploy/publish.sh $GITHUB_SHA"

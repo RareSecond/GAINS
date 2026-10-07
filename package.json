@@ -11,14 +11,17 @@
     "dev": "vite --host 127.0.0.1 --port 3000",
     "prebuild": "npm run db:generate",
     "build": "vite build",
-    "start": "node --env-file=.env .output/server/index.mjs",
+    "start": "node --env-file-if-exists=.env .output/server/index.mjs",
     "typecheck": "tsc --noEmit",
     "test": "node --env-file-if-exists=.env.test --import tsx --test tests/*.test.ts",
     "test:browser": "node --env-file-if-exists=.env.test --import tsx --test tests/*.browser.ts",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate deploy",
     "db:dev": "prisma migrate dev",
-    "db:auth-schema": "auth generate --config src/server/auth-schema.ts --output prisma/schema.prisma --yes"
+    "db:auth-schema": "auth generate --config src/server/auth-schema.ts --output prisma/schema.prisma --yes",
+    "dev:phase": "sh deploy/phase.sh dev",
+    "start:phase": "sh deploy/phase.sh start",
+    "db:migrate:phase": "sh deploy/phase.sh migrate"
   },
   "dependencies": {
     "@better-auth/cimd": "1.7.7",
