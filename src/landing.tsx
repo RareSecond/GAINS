@@ -1,5 +1,5 @@
 // Server-rendered public homepage. Anyone can read this without signing in; the signed-in app replaces it on the client.
-export function Landing() {
+export function Landing({ returnTo = '/' }: { returnTo?: string }) {
   return <>
     <header className="topbar"><a className="brand" href="/"><img className="logo" src="/logo.png" alt="GAINS" width="512" height="512" /><span>TRAINING REMOTE</span></a></header>
     <main>
@@ -7,7 +7,7 @@ export function Landing() {
         <p className="eyebrow">READY WHEN YOU ARE</p>
         <h1>Your plan.<br />Your performance.</h1>
         <p>GAINS is a strength-training remote. You agree on a concrete workout with ChatGPT, then record what you actually lift in the GAINS web app, set by set.</p>
-        <a className="button" href="/login">Continue with Google</a>
+        <a className="button" href={`/login?returnTo=${encodeURIComponent(returnTo)}`}>Continue with Google</a>
       </section>
       <section>
         <h2>How it works</h2>
