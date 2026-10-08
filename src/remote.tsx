@@ -5,20 +5,22 @@ import { useAccount } from './lib/use-account'
 import { editLocal, readLocal, unsaved, type Profile } from './lib/local'
 import { loadLabel, type Workout } from './lib/domain'
 import { Recorder } from './recorder'
+import { Landing } from './landing'
 
 type Context = { active: { id: string; title: string; completed: number; unrecorded: number } | null; upcoming: { id: string; title: string; createdAt: string }[]; recent: { id: string; title: string; completed: number; skipped: number; unrecorded: number; finishedAt: string }[]; nextCursor: string | null; asOf: string }
 export function Remote() {
   const { profile, error } = useAccount()
   const path = window.location.pathname
   if (path === '/login') return <Login />
+  if (profile === null) return <Landing returnTo={path} />
   return <><header className={`topbar ${path.startsWith('/sessions/') ? 'session-topbar' : ''}`}><a className="brand" href="/"><img className="logo" src="/logo.png" alt="GAINS" width="512" height="512" /><span>TRAINING REMOTE</span></a><a className="icon-link" href="/settings" aria-label="Account settings">⚙</a></header><main className={path.startsWith('/sessions/') ? 'session-main' : undefined}>
     {error && <p role="alert" className="notice warning">{error} Local retention may be unavailable.</p>}
-    {profile === undefined ? <p className="muted">Opening your remote…</p> : !profile ? <section className="hero"><p className="eyebrow">READY WHEN YOU ARE</p><h1>Your plan.<br />Your performance.</h1><p>Agree on a workout in ChatGPT. Record what happens here.</p><a className="button" href={`/login?returnTo=${encodeURIComponent(path)}`}>Continue with Google</a></section> :
+    {profile === undefined ? <p className="muted">Opening your remote…</p> :
       path.startsWith('/sessions/') ? <Recorder key={`${profile.id}:${path}`} profile={profile} id={path.split('/')[2]} /> :
       path.startsWith('/workouts/') ? <Preview key={`${profile.id}:${path}`} profile={profile} id={path.split('/')[2]} /> :
       path === '/settings' ? <Settings key={profile.id} profile={profile} /> :
       path === '/oauth/consent' ? <Consent key={profile.id} profile={profile} /> : <Dashboard key={profile.id} profile={profile} />}
-  </main><footer>Prescribed in chat. Performed by you.</footer></>
+  </main><footer>Prescribed in chat. Performed by you. · <a href="/privacy">Privacy policy</a></footer></>
 }
 function Login() {
   const [error, setError] = useState(''), [busy, setBusy] = useState(false)
@@ -32,7 +34,7 @@ function Login() {
       if (result.error) throw new Error(result.error.message)
     } catch (e) { setError((e as Error).message); setBusy(false) }
   }
-  return <main className="login"><a className="brand" href="/"><img className="logo" src="/logo.png" alt="GAINS" width="512" height="512" /></a><p className="eyebrow">YOUR TRAINING, RECORDED</p><h1>Make every<br />set count.</h1><p>A simple remote for the concrete workouts you agree on in ChatGPT.</p><button onClick={signIn} disabled={busy}>{busy ? 'Connecting…' : 'Continue with Google'}</button>{error && <p role="alert">{error}</p>}<p className="muted">Your Google account identifies your GAINS account. Connect ChatGPT to the same account.</p></main>
+  return <main className="login"><a className="brand" href="/"><img className="logo" src="/logo.png" alt="GAINS" width="512" height="512" /></a><p className="eyebrow">YOUR TRAINING, RECORDED</p><h1>Make every<br />set count.</h1><p>A simple remote for the concrete workouts you agree on in ChatGPT.</p><button onClick={signIn} disabled={busy}>{busy ? 'Connecting…' : 'Continue with Google'}</button>{error && <p role="alert">{error}</p>}<p className="muted">Your Google account identifies your GAINS account. Connect ChatGPT to the same account.</p><p className="muted"><a href="/">About GAINS</a> · <a href="/privacy">Privacy policy</a></p></main>
 }
 function Dashboard({ profile }: { profile: Profile }) {
   const [context, setContext] = useState<Context>(), [error, setError] = useState('')

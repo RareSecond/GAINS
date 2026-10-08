@@ -14,6 +14,7 @@ import { Route as HealthRouteImport } from './routes/health'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as McpRouteImport } from './routes/mcp'
 import { Route as OfflineRouteImport } from './routes/offline'
+import { Route as PrivacyRouteImport } from './routes/privacy'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as DotwellKnownSplatRouteImport } from './routes/[.]well-known.$'
 import { Route as ApiDataRouteImport } from './routes/api.data'
@@ -45,6 +46,11 @@ const McpRoute = McpRouteImport.update({
 const OfflineRoute = OfflineRouteImport.update({
   id: '/offline',
   path: '/offline',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PrivacyRoute = PrivacyRouteImport.update({
+  id: '/privacy',
+  path: '/privacy',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SettingsRoute = SettingsRouteImport.update({
@@ -89,6 +95,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/mcp': typeof McpRoute
   '/offline': typeof OfflineRoute
+  '/privacy': typeof PrivacyRoute
   '/settings': typeof SettingsRoute
   '/.well-known/$': typeof DotwellKnownSplatRoute
   '/api/data': typeof ApiDataRoute
@@ -103,6 +110,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/mcp': typeof McpRoute
   '/offline': typeof OfflineRoute
+  '/privacy': typeof PrivacyRoute
   '/settings': typeof SettingsRoute
   '/.well-known/$': typeof DotwellKnownSplatRoute
   '/api/data': typeof ApiDataRoute
@@ -118,6 +126,7 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/mcp': typeof McpRoute
   '/offline': typeof OfflineRoute
+  '/privacy': typeof PrivacyRoute
   '/settings': typeof SettingsRoute
   '/.well-known/$': typeof DotwellKnownSplatRoute
   '/api/data': typeof ApiDataRoute
@@ -134,6 +143,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/mcp'
     | '/offline'
+    | '/privacy'
     | '/settings'
     | '/.well-known/$'
     | '/api/data'
@@ -148,6 +158,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/mcp'
     | '/offline'
+    | '/privacy'
     | '/settings'
     | '/.well-known/$'
     | '/api/data'
@@ -162,6 +173,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/mcp'
     | '/offline'
+    | '/privacy'
     | '/settings'
     | '/.well-known/$'
     | '/api/data'
@@ -177,6 +189,7 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   McpRoute: typeof McpRoute
   OfflineRoute: typeof OfflineRoute
+  PrivacyRoute: typeof PrivacyRoute
   SettingsRoute: typeof SettingsRoute
   DotwellKnownSplatRoute: typeof DotwellKnownSplatRoute
   ApiDataRoute: typeof ApiDataRoute
@@ -221,6 +234,13 @@ declare module '@tanstack/react-router' {
       path: '/offline'
       fullPath: '/offline'
       preLoaderRoute: typeof OfflineRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/privacy': {
+      id: '/privacy'
+      path: '/privacy'
+      fullPath: '/privacy'
+      preLoaderRoute: typeof PrivacyRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/settings': {
@@ -281,6 +301,7 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   McpRoute: McpRoute,
   OfflineRoute: OfflineRoute,
+  PrivacyRoute: PrivacyRoute,
   SettingsRoute: SettingsRoute,
   DotwellKnownSplatRoute: DotwellKnownSplatRoute,
   ApiDataRoute: ApiDataRoute,
