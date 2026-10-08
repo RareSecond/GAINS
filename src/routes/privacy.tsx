@@ -12,7 +12,7 @@ function Privacy() {
       <p className="muted">Last updated: 8 October 2026</p>
 
       <section>
-        <p>This policy explains how GAINS (the strength-training remote available at gains.codictive.be, together with its ChatGPT connection) handles personal data. GAINS is operated by <strong>[legal name of the operator, registered address and company number]</strong>. For privacy questions and requests, contact <strong>[privacy contact email address]</strong>.</p>
+        <p>This policy explains how GAINS (the strength-training remote available at gains.codictive.be, together with its ChatGPT connection) handles personal data. GAINS is operated by <strong>Codictive</strong>. For privacy questions and requests, contact <strong>privacy@codictive.be</strong>.</p>
       </section>
 
       <section>
@@ -54,7 +54,7 @@ function Privacy() {
         <h2>5. Who receives your data</h2>
         <ul>
           <li><strong>Google</strong>, which provides sign-in.</li>
-          <li><strong>Database hosting</strong>: [name of PostgreSQL provider, for example Neon], which stores the application data.</li>
+          <li><strong>Database hosting</strong>: a managed PostgreSQL provider, which stores the application data.</li>
           <li><strong>Server hosting</strong>: DigitalOcean, which runs GAINS.</li>
           <li><strong>ChatGPT (OpenAI)</strong>, only if you connect it. ChatGPT receives the workout and training data it requests through the connection, and handles that data under its own terms and privacy policy.</li>
           <li><strong>Authorities</strong>, where the law requires it.</li>
@@ -64,7 +64,7 @@ function Privacy() {
 
       <section>
         <h2>6. How long we keep data</h2>
-        <p>We keep your account and training data while your account is active. Sign-in sessions expire automatically. Error logs are kept for 30 days and then deleted. When you ask us to delete your account, we delete your account, Google profile data, training data and ChatGPT connection records. Copies held in backups are overwritten on their normal rotation, which is [backup retention period].</p>
+        <p>We keep your account and training data while your account is active. Sign-in sessions expire automatically. Error logs are kept for 30 days and then deleted. When you ask us to delete your account, we delete your account, Google profile data, training data and ChatGPT connection records.</p>
       </section>
 
       <section>
