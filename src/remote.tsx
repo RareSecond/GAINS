@@ -18,7 +18,7 @@ export function Remote() {
       path.startsWith('/workouts/') ? <Preview key={`${profile.id}:${path}`} profile={profile} id={path.split('/')[2]} /> :
       path === '/settings' ? <Settings key={profile.id} profile={profile} /> :
       path === '/oauth/consent' ? <Consent key={profile.id} profile={profile} /> : <Dashboard key={profile.id} profile={profile} />}
-  </main><footer>Prescribed in chat. Performed by you.</footer></>
+  </main><footer>Prescribed in chat. Performed by you. · <a href="/privacy">Privacy policy</a></footer></>
 }
 function Login() {
   const [error, setError] = useState(''), [busy, setBusy] = useState(false)
@@ -32,7 +32,7 @@ function Login() {
       if (result.error) throw new Error(result.error.message)
     } catch (e) { setError((e as Error).message); setBusy(false) }
   }
-  return <main className="login"><a className="brand" href="/"><img className="logo" src="/logo.png" alt="GAINS" width="512" height="512" /></a><p className="eyebrow">YOUR TRAINING, RECORDED</p><h1>Make every<br />set count.</h1><p>A simple remote for the concrete workouts you agree on in ChatGPT.</p><button onClick={signIn} disabled={busy}>{busy ? 'Connecting…' : 'Continue with Google'}</button>{error && <p role="alert">{error}</p>}<p className="muted">Your Google account identifies your GAINS account. Connect ChatGPT to the same account.</p></main>
+  return <main className="login"><a className="brand" href="/"><img className="logo" src="/logo.png" alt="GAINS" width="512" height="512" /></a><p className="eyebrow">YOUR TRAINING, RECORDED</p><h1>Make every<br />set count.</h1><p>A simple remote for the concrete workouts you agree on in ChatGPT.</p><button onClick={signIn} disabled={busy}>{busy ? 'Connecting…' : 'Continue with Google'}</button>{error && <p role="alert">{error}</p>}<p className="muted">Your Google account identifies your GAINS account. Connect ChatGPT to the same account.</p><p className="muted"><a href="/">About GAINS</a> · <a href="/privacy">Privacy policy</a></p></main>
 }
 function Dashboard({ profile }: { profile: Profile }) {
   const [context, setContext] = useState<Context>(), [error, setError] = useState('')
