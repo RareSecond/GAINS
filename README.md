@@ -50,6 +50,8 @@ Open/start a workout online first. An opened session, draft inputs, and an order
 
 The service worker precaches only the empty `/offline` shell and built public assets. It does not cache auth, API, or MCP responses. Reloading an opened recording page offline works after the service worker installs. Offline finish stays pending until all preceding changes and Finish are acknowledged. Reconnect/focus triggers uploads; uploads are not promised while the app is closed.
 
+GAINS is an installable PWA: `public/manifest.webmanifest` opens `/` standalone, with icons generated from the GAINS logo (separate maskable variants keep the artwork inside Android's safe zone). Launching the installed app offline opens the cached shell rather than a browser error. The dashboard still needs the network for its workout list, so open an active session online first.
+
 Conflicts retain the local version, show the server comparison, and require either explicitly discarding local changes or reapplying compatible edits. A finished server session cannot be reopened. Retained changes can be exported before discarding. Browser storage failures are visible and block further recording instead of claiming offline safety.
 
 Sign-out hides cached data and stops uploads. If drafts or queued edits exist, the user must deliberately choose to sign out while retaining them. The same authenticated account must return before uploading. Each sync verifies the server identity; another account cannot acquire or upload the old queue. Local data remains on that browser profile until site storage is cleared.
