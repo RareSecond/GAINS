@@ -1,4 +1,4 @@
-// Only the empty shell and public, versioned assets are cached. API/auth/MCP responses never enter this cache.
+// Only the empty shell (also the offline fallback for the installed app's start URL) and public, versioned assets are cached. API/auth/MCP responses never enter this cache.
 const VERSION = '__BUILD_ID__';
 const CACHE = `gains-shell-${VERSION}`;
 const ASSETS = __ASSETS__;
@@ -15,7 +15,7 @@ self.addEventListener('fetch', event => {
   if (url.origin !== self.location.origin || event.request.method !== 'GET') return;
   if (url.pathname.startsWith('/assets/')) {
     event.respondWith(caches.open(CACHE).then(cache => cache.match(event.request)).then(cached => cached || fetch(event.request)));
-  } else if (event.request.mode === 'navigate' && (url.pathname.startsWith('/sessions/') || url.pathname === '/offline')) {
+  } else if (event.request.mode === 'navigate' && (url.pathname === '/' || url.pathname.startsWith('/sessions/') || url.pathname === '/offline')) {
     event.respondWith(fetch(event.request).catch(async () => (await caches.open(CACHE)).match('/offline')));
   }
 });

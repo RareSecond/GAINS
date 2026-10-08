@@ -108,6 +108,11 @@ test('mobile recording, offline reload/reconnect, conflicts, finishing and accou
     await page.reload({ waitUntil: 'domcontentloaded' })
     await page.getByRole('heading', { name: 'Workout A', exact: true }).waitFor()
     await page.getByRole('timer').waitFor()
+    // The installed app's start URL opens the cached shell instead of a browser error.
+    await page.goto(`${origin}/`, { waitUntil: 'domcontentloaded' })
+    await page.getByRole('heading', { name: 'Your training' }).waitFor()
+    await page.goto(`${origin}/sessions/${sessionId}`, { waitUntil: 'domcontentloaded' })
+    await page.getByRole('heading', { name: 'Workout A', exact: true }).waitFor()
     await selectSet(secondLeft.id)
     assert.match(await page.locator(`#current-set-${secondLeft.id}`).getByRole('button', { name: 'Save correction' }).innerText(), /5 reps/)
     assert.equal((await getSession(u.id, sessionId)).exercises[4].sets.find(x => x.id === secondLeft.id)!.status, 'PENDING')
