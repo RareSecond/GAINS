@@ -111,13 +111,19 @@ export function Recorder({ profile, id }: { profile: Profile; id: string }) {
   const cancelWorkout = async (operationId: string, expectedRevision: number, workoutId: string) => {
     setCancelling(true); setError('')
     try {
+      // Another tab may have queued work after this dialog opened; that work must sync, not be discarded.
+      const latest = await readLocal<LocalSession>(key)
+      if (latest?.queue.length || latest?.conflict || latest?.blocked) throw new ApiError('CONFLICT', 'Unsynchronized changes exist. Let them save before cancelling.', 409)
       await apiPost({ action: 'cancel', sessionId: id, expectedRevision, operationId })
-      // The server session is gone; its local copy holds nothing worth retaining.
-      try { await editLocal<LocalSession>(key, () => undefined) } catch { /* Stale local copies are replaced on the next start. */ }
+      // The server session is gone; retain the local copy only if work was queued during the request.
+      try { await editLocal<LocalSession>(key, r => r?.queue.length ? r : undefined) } catch { /* Stale local copies are replaced on the next start. */ }
       location.assign(`/workouts/${workoutId}`)
     } catch (e) {
-      setCancelling(false); setCancelOperation(undefined); setError((e as Error).message)
-      if (e instanceof ApiError && e.code === 'CONFLICT') void cacheSession(profile, id).then(r => { if (alive.current) setRecord(r) }).catch(() => {})
+      setCancelling(false); setError((e as Error).message)
+      // Keep the operation ID unless the server definitively refused, so a retry after a lost response replays the receipt.
+      if (!(e instanceof ApiError) || e.status >= 500) return
+      setCancelOperation(undefined)
+      if (e.code === 'CONFLICT') void cacheSession(profile, id).then(r => { if (alive.current) setRecord(r) }).catch(() => {})
     }
   }
   if (!record) return <p role={error ? 'alert' : undefined}>{error || 'Opening your session…'}</p>
@@ -159,7 +165,7 @@ export function Recorder({ profile, id }: { profile: Profile; id: string }) {
     </details>
     {session.status === 'FINISHED' && <p className="notice">{pendingFinish ? 'Finished locally. Earlier entries will sync first, followed by Finish. The server has not acknowledged completion yet.' : `Finished ${session.finishedAt ? new Date(session.finishedAt).toLocaleString() : ''}. Completed history is read-only.`}</p>}
     {finish && <Dialog title="finish-title" onClose={() => setFinish(false)}><h2 id="finish-title">Finish this session?</h2><p>{totals.completed} completed · {totals.skipped} skipped · {totals.unrecorded} unrecorded</p><p>Unrecorded work stays unrecorded. Completed history becomes read-only.</p><p>{record.queue.length ? `${record.queue.length} preceding changes must synchronize first.` : 'All preceding entries are saved.'}{offline ? ' Finish will be retained locally until you reconnect.' : ''}</p><button onClick={async () => { await mutate({ kind: 'finish', notes: record.sessionNotesDraft ?? session.notes }); setFinish(false) }}>Finish workout</button><button className="secondary" autoFocus onClick={() => setFinish(false)}>Keep training</button>{!totals.completed && <button className="text-button" disabled={offline || saving || record.queue.length > 0} onClick={() => { setFinish(false); setCancelOperation(crypto.randomUUID()) }}>Started by mistake? Cancel workout</button>}</Dialog>}
-    {cancelOperation && <Dialog title="cancel-title" onClose={() => setCancelOperation(undefined)}><h2 id="cancel-title">Cancel this workout?</h2><p>Nothing has been completed yet. Cancelling discards this session and returns {session.workout.title} to your upcoming workouts, unchanged. It will not appear in your history.</p><button disabled={cancelling} onClick={() => cancelWorkout(cancelOperation, record.base.revision, session.workout.id)}>{cancelling ? 'Cancelling…' : 'Cancel workout'}</button><button className="secondary" autoFocus disabled={cancelling} onClick={() => setCancelOperation(undefined)}>Keep training</button></Dialog>}
+    {cancelOperation && <Dialog title="cancel-title" onClose={() => setCancelOperation(undefined)}><h2 id="cancel-title">Cancel this workout?</h2>{error && <p role="alert">{error}</p>}<p>Nothing has been completed yet. Cancelling discards this session and returns {session.workout.title} to your upcoming workouts, unchanged. It will not appear in your history.</p><button disabled={cancelling} onClick={() => cancelWorkout(cancelOperation, record.base.revision, session.workout.id)}>{cancelling ? 'Cancelling…' : 'Cancel workout'}</button><button className="secondary" autoFocus disabled={cancelling} onClick={() => setCancelOperation(undefined)}>Keep training</button></Dialog>}
     {selection && <ExercisePicker catalog={catalog} onCatalog={setCatalog} selection={selection} onClose={() => setSelection(undefined)} onSelect={async e => { await mutate(selection.mode === 'extra' ? { kind: 'addExercise', exerciseId: e.id, newExerciseRowId: crypto.randomUUID(), notes: null } : { kind: 'substitute', exerciseRowId: selection.exercise!.id, exerciseId: e.id, newExerciseRowId: crypto.randomUUID(), notes: null }, e); setSelection(undefined) }} />}
   </div>
 }

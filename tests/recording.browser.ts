@@ -184,6 +184,23 @@ test('cancelling an accidental start returns the workout to upcoming', { timeout
     await page.getByRole('button', { name: 'Finish', exact: true }).click()
     await page.getByRole('button', { name: 'Started by mistake? Cancel workout' }).click()
     await page.getByRole('heading', { name: 'Cancel this workout?' }).waitFor()
+    // Work queued by another tab after the dialog opened blocks cancelling instead of being discarded.
+    const setQueue = (queued: boolean) => page.evaluate(async ({ key, queued }) => {
+      const db = await new Promise<IDBDatabase>((resolve, reject) => { const r = indexedDB.open('gains-v1'); r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error) })
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction('records', 'readwrite'), store = tx.objectStore('records'), get = store.get(key)
+        get.onsuccess = () => store.put({ ...get.result, queue: queued ? [{ operationId: crypto.randomUUID(), expectedRevision: 1, operation: { kind: 'notes', notes: 'Other tab' } }] : [] }, key)
+        tx.oncomplete = () => resolve(); tx.onerror = () => reject(tx.error)
+      })
+      db.close()
+    }, { key: `session:${u.id}:${sessionId}`, queued })
+    await setQueue(true)
+    await page.getByRole('dialog').getByRole('button', { name: 'Cancel workout', exact: true }).click()
+    await page.getByText('Unsynchronized changes exist. Let them save before cancelling.').first().waitFor()
+    assert.equal(await db.trainingSession.count({ where: { id: sessionId } }), 1)
+    await setQueue(false)
+    await page.getByRole('button', { name: 'Finish', exact: true }).click()
+    await page.getByRole('button', { name: 'Started by mistake? Cancel workout' }).click()
     await page.getByRole('dialog').getByRole('button', { name: 'Cancel workout', exact: true }).click()
     await page.waitForURL(`**/workouts/${f.saved.id}`)
     await page.getByRole('button', { name: 'Start workout' }).waitFor()
