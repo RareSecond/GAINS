@@ -3,11 +3,11 @@ import { authClient } from './lib/auth-client'
 import { apiGet, apiPost } from './lib/api-client'
 import { useAccount } from './lib/use-account'
 import { editLocal, readLocal, unsaved, type Profile } from './lib/local'
-import { loadLabel, platesLabel, type Workout } from './lib/domain'
+import { durationLabel, loadLabel, platesLabel, type Workout } from './lib/domain'
 import { Recorder } from './recorder'
 import { Landing } from './landing'
 
-type Context = { active: { id: string; title: string; completed: number; unrecorded: number } | null; upcoming: { id: string; title: string; createdAt: string }[]; recent: { id: string; title: string; completed: number; skipped: number; unrecorded: number; finishedAt: string }[]; nextCursor: string | null; asOf: string }
+type Context = { active: { id: string; title: string; completed: number; unrecorded: number } | null; upcoming: { id: string; title: string; createdAt: string }[]; recent: { id: string; title: string; completed: number; skipped: number; unrecorded: number; startedAt: string; finishedAt: string }[]; nextCursor: string | null; asOf: string }
 export function Remote() {
   const { profile, error } = useAccount()
   const path = window.location.pathname
@@ -42,7 +42,7 @@ function Dashboard({ profile }: { profile: Profile }) {
   return <><div className="page-heading"><p className="eyebrow">LET’S GET TO WORK</p><h1>Your training</h1><p className="muted">Welcome back, {profile.name.split(' ')[0]}.</p></div>{error && <p role="alert" className="notice">{error}</p>}
     {context?.active && <a className="active-card" href={`/sessions/${context.active.id}`}><span className="eyebrow">IN PROGRESS</span><h2>{context.active.title}</h2><p>{context.active.completed} confirmed · {context.active.unrecorded} unrecorded</p><span className="button">Resume session →</span></a>}
     <section><div className="section-heading"><h2>Up next</h2><span className="badge">{context?.upcoming.length ?? '—'}</span></div>{context && !context.upcoming.length && <div className="empty"><h3>Your next workout starts in chat.</h3><p>Connect GAINS in ChatGPT, agree on a concrete workout, and ask it to save it.</p><a href="/settings">Connect ChatGPT →</a></div>}{context?.upcoming.map((w, i) => <a className="workout-card" key={w.id} href={`/workouts/${w.id}`}><span className="workout-number">{String(i + 1).padStart(2, '0')}</span><div><h3>{w.title}</h3><p className="muted">Ready to train</p></div><span aria-hidden="true">↗</span></a>)}</section>
-    <section><h2>Recent sessions</h2>{context && !context.recent.length && <p className="muted">Finished workouts will appear here.</p>}{context?.recent.map(s => <a className="history-card" href={`/sessions/${s.id}`} key={s.id}><div><h3>{s.title}</h3><p className="muted">{new Date(s.finishedAt).toLocaleDateString()} · {s.completed} completed · {s.skipped} skipped · {s.unrecorded} unrecorded</p></div><span>→</span></a>)}{context?.nextCursor && <button className="secondary" onClick={() => apiGet<Context>('context', { cursor: context.nextCursor! }).then(next => setContext({ ...next, recent: [...context.recent, ...next.recent] })).catch(e => setError(e.message))}>More history</button>}</section>
+    <section><h2>Recent sessions</h2>{context && !context.recent.length && <p className="muted">Finished workouts will appear here.</p>}{context?.recent.map(s => <a className="history-card" href={`/sessions/${s.id}`} key={s.id}><div><h3>{s.title}</h3><p className="muted">{new Date(s.finishedAt).toLocaleDateString()} · {durationLabel(s.startedAt, s.finishedAt)} · {s.completed} completed · {s.skipped} skipped · {s.unrecorded} unrecorded</p></div><span>→</span></a>)}{context?.nextCursor && <button className="secondary" onClick={() => apiGet<Context>('context', { cursor: context.nextCursor! }).then(next => setContext({ ...next, recent: [...context.recent, ...next.recent] })).catch(e => setError(e.message))}>More history</button>}</section>
   </>
 }
 function Preview({ id }: { id: string; profile: Profile }) {

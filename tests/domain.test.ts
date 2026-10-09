@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
-import { applyOperation, blankMeasurements, counts, executionOrder, loadLabel, measurementsSchema, plannedSetSchema, platesLabel, prescriptionSchema, type Session } from '../src/lib/domain'
+import { applyOperation, blankMeasurements, counts, executionOrder, loadLabel, durationLabel, measurementsSchema, plannedSetSchema, platesLabel, prescriptionSchema, type Session } from '../src/lib/domain'
 import { acknowledge, enqueue, projected, reapply, type LocalSession } from '../src/lib/outbox'
 import { ids, measurements, prescription } from './fixture'
 function session(p = prescription(ids())): Session {
@@ -113,4 +113,13 @@ test('plate loading is optional, positive, bounded and needs a numeric load', ()
   assert.equal(platesLabel(['15', '2.5'], 'KG'), '15 + 2.5 kg per side')
   assert.equal(platesLabel([], 'KG'), '')
   assert.equal(platesLabel(undefined, 'KG'), '') // Sessions cached before plates existed.
+})
+
+test('workout duration formats elapsed wall-clock time', () => {
+  const start = '2026-10-09T10:00:00.000Z'
+  assert.equal(durationLabel(start, start), '0:00')
+  assert.equal(durationLabel(start, '2026-10-09T10:00:09.900Z'), '0:09')
+  assert.equal(durationLabel(start, '2026-10-09T10:52:13.000Z'), '52:13')
+  assert.equal(durationLabel(start, '2026-10-09T11:05:07.000Z'), '1:05:07')
+  assert.equal(durationLabel(start, '2026-10-09T09:59:30.000Z'), '0:00') // Device clock behind the server.
 })
