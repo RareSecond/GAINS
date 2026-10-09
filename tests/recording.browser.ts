@@ -167,3 +167,38 @@ test('mobile recording, offline reload/reconnect, conflicts, finishing and accou
     assert.deepEqual(errors, [])
   } catch (e) { await mkdir('test-results', { recursive: true }); await page.screenshot({ path: 'test-results/browser-failure.png', fullPage: true }).catch(() => {}); await writeFile('test-results/browser-failure.txt', await page.locator('body').innerText().catch(() => 'Page closed')); throw e } finally { await browser.close(); await cleanup([u.id, second.id]); await app.stop() }
 })
+
+test('cancelling an accidental start returns the workout to upcoming', { timeout: 60000 }, async t => {
+  const app = await startApp(), u = await createUser()
+  const browser = await chromium.launch(), context = await browser.newContext({ viewport: { width: 390, height: 844 } }), page = await context.newPage()
+  t.after(async () => { await browser.close(); await app.stop() })
+  page.setDefaultTimeout(15000)
+  const errors: string[] = []; page.on('pageerror', e => errors.push(e.message))
+  try {
+    const f = await workout(u.id), cookie = await sessionCookie(u.id)
+    await context.addCookies([{ ...cookie, value: encodeURIComponent(cookie.value), url: origin, httpOnly: true, sameSite: 'Lax' }])
+    await page.goto(`${origin}/workouts/${f.saved.id}`)
+    await page.getByRole('button', { name: 'Start workout' }).click()
+    await page.waitForURL('**/sessions/*')
+    const sessionId = page.url().split('/').at(-1)!
+    await page.getByRole('button', { name: 'Finish', exact: true }).click()
+    await page.getByRole('button', { name: 'Started by mistake? Cancel workout' }).click()
+    await page.getByRole('heading', { name: 'Cancel this workout?' }).waitFor()
+    await page.getByRole('dialog').getByRole('button', { name: 'Cancel workout', exact: true }).click()
+    await page.waitForURL(`**/workouts/${f.saved.id}`)
+    await page.getByRole('button', { name: 'Start workout' }).waitFor()
+    assert.equal(await db.trainingSession.count({ where: { id: sessionId } }), 0)
+    assert.equal((await db.workout.findUniqueOrThrow({ where: { id: f.saved.id } })).frozenAt, null)
+    // Once a set is completed the session is history: cancelling is no longer offered.
+    await page.getByRole('button', { name: 'Start workout' }).click()
+    await page.waitForURL('**/sessions/*')
+    const s = await getSession(u.id, page.url().split('/').at(-1)!)
+    await mutateSession(u.id, s.id, { operationId: randomUUID(), expectedRevision: 1, operation: { kind: 'record', setId: s.exercises[2].sets[0].id, measurements: measurements() } })
+    await page.reload()
+    await page.getByText(/1 completed/).first().waitFor()
+    await page.getByRole('button', { name: 'Finish', exact: true }).click()
+    await page.getByRole('heading', { name: 'Finish this session?' }).waitFor()
+    assert.equal(await page.getByRole('button', { name: /Cancel workout/ }).count(), 0)
+    assert.deepEqual(errors, [])
+  } finally { await cleanup([u.id]) }
+})

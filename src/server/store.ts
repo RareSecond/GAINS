@@ -111,6 +111,18 @@ export async function startSession(userId: string, id: string, operationId: stri
     return { id: sessionId, revision: 1 }
   })
 }
+// Discards an accidental start: only an active session with nothing completed, which returns its workout to upcoming.
+export async function cancelSession(userId: string, id: string, expectedRevision: number, operationId: string) {
+  return mutate(userId, operationId, 'cancel_session', { id }, async tx => {
+    const s = await getSession(userId, id, tx)
+    if (s.status !== 'ACTIVE') throw new DomainError('CONFLICT', 'A finished session is history and cannot be cancelled.')
+    if (s.revision !== expectedRevision) throw new DomainError('CONFLICT', 'The server session changed on another device. Reload it before cancelling.')
+    if (s.exercises.some(e => e.sets.some(x => x.status === 'COMPLETED'))) throw new DomainError('CONFLICT', 'Completed sets are training history. Finish the session instead.')
+    await tx.trainingSession.delete({ where: { id } })
+    await tx.workout.update({ where: { id: s.workout.id }, data: { frozenAt: null } })
+    return { id, revision: s.revision + 1 }
+  })
+}
 export async function mutateSession(userId: string, id: string, raw: unknown) {
   const { operationId, expectedRevision, operation } = queuedMutationSchema.parse(raw)
   // Revision is transport state, not mutation identity: a lost acknowledgement may be retried or rebased.
