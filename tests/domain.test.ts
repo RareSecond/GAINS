@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
-import { applyOperation, blankMeasurements, counts, executionOrder, loadLabel, measurementsSchema, plannedSetSchema, prescriptionSchema, type Session } from '../src/lib/domain'
+import { applyOperation, blankMeasurements, counts, executionOrder, loadLabel, measurementsSchema, plannedSetSchema, platesLabel, prescriptionSchema, type Session } from '../src/lib/domain'
 import { acknowledge, enqueue, projected, reapply, type LocalSession } from '../src/lib/outbox'
 import { ids, measurements, prescription } from './fixture'
 function session(p = prescription(ids())): Session {
@@ -102,4 +102,15 @@ test('rest targets and retained countdown survive acknowledgement and correction
   assert.equal(r.rest, undefined) // Explicit zero starts no timer.
   assert.equal(enqueue(paused, record(base.exercises[2].sets[0].id)).rest, undefined) // Unspecified rest starts no timer.
   assert.equal(enqueue(paused, { operationId: randomUUID(), expectedRevision: 4, operation: { kind: 'finish', notes: null } }).rest, undefined)
+})
+
+test('plate loading is optional, positive, bounded and needs a numeric load', () => {
+  const p = prescription(ids()), bench = p.groups[2].exercises[0].sets[0], bodyweight = p.groups[0].exercises[0].sets[0]
+  assert.deepEqual(bench.platesPerSide, [])
+  assert.deepEqual(plannedSetSchema.parse({ ...bench, platesPerSide: ['15', '2.5'] }).platesPerSide, ['15', '2.5'])
+  for (const platesPerSide of [['0'], ['-5'], [15], ['1.2345'], Array(21).fill('1.25')]) assert.throws(() => plannedSetSchema.parse({ ...bench, platesPerSide }))
+  assert.throws(() => plannedSetSchema.parse({ ...bodyweight, platesPerSide: ['20'] }))
+  assert.equal(platesLabel(['15', '2.5'], 'KG'), '15 + 2.5 kg per side')
+  assert.equal(platesLabel([], 'KG'), '')
+  assert.equal(platesLabel(undefined, 'KG'), '') // Sessions cached before plates existed.
 })

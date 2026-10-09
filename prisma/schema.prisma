@@ -391,6 +391,7 @@ model PlannedSet {
   rpeMin            Decimal?        @db.Decimal(4, 2)
   rpeMax            Decimal?        @db.Decimal(4, 2)
   restSeconds       Int?
+  platesPerSide     Decimal[]       @default([]) @db.Decimal(9, 3)
   executions        SessionSet[]
 
   @@unique([workoutExerciseId, setNumber, side])

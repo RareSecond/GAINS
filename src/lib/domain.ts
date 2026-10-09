@@ -12,11 +12,14 @@ const loadFields = { loadValue: nullable(mass), loadUnit: nullable(unit), loadCo
 export const plannedSetSchema = z.strictObject({
   setNumber: z.number().int().min(1).max(50), side, repsMin: z.number().int().min(1).max(1000), repsMax: z.number().int().min(1).max(1000),
   restSeconds: nullable(z.number().int().min(0).max(3600).describe('Rest after this set in seconds; null is unspecified, zero means no rest. For supersets/circuits, put the round rest on the last exercise/side.')),
-  ...loadFields, rpeMin: nullable(z.number().min(0).max(10).multipleOf(0.01)), rpeMax: nullable(z.number().min(0).max(10).multipleOf(0.01)),
+  ...loadFields,
+  platesPerSide: z.array(mass.refine(v => Number(v) > 0, 'Plates must weigh more than zero')).max(20).default([]).describe('Plates to load on each side of the bar, sled or loadable handle for this set, heaviest first, in the set load unit. Choose them from the plates the user has; empty when plates do not apply (fixed dumbbells, machines with a stack, bodyweight). Bar or handle weight plus both sides should equal the load.'),
+  rpeMin: nullable(z.number().min(0).max(10).multipleOf(0.01)), rpeMax: nullable(z.number().min(0).max(10).multipleOf(0.01)),
 }).superRefine((s, ctx) => {
   if (s.repsMin > s.repsMax) ctx.addIssue({ code: 'custom', path: ['repsMax'], message: 'Maximum must be at least minimum reps' })
   if ((s.rpeMin === null) !== (s.rpeMax === null) || (s.rpeMin !== null && s.rpeMax !== null && s.rpeMin > s.rpeMax)) ctx.addIssue({ code: 'custom', path: ['rpeMax'], message: 'Provide an ordered RPE range or neither bound' })
   checkLoad(s.loadValue, s.loadUnit, s.loadConvention, ctx)
+  if (s.platesPerSide.length && s.loadValue === null) ctx.addIssue({ code: 'custom', path: ['platesPerSide'], message: 'Plates need a numeric load' })
 })
 function checkLoad(value: string | null, u: string | null, c: string | null, ctx: z.RefinementCtx) {
   if (value !== null && (!u || !c || c === 'BODYWEIGHT')) ctx.addIssue({ code: 'custom', message: 'Numeric mass needs unit and convention; bodyweight has no numeric mass' })
@@ -135,4 +138,7 @@ export function targetFor(s: Session, set: RecordedSet) { return s.workout.group
 export const loadLabels: Record<z.infer<typeof convention>, string> = { TOTAL_EXTERNAL: 'total', PER_DUMBBELL: 'per dumbbell', ADDED: 'added', ASSISTANCE: 'assistance', BODYWEIGHT: 'bodyweight' }
 export function loadLabel(value: string | null, u: string | null, c: z.infer<typeof convention> | null, missing = 'unspecified load') {
   return c === 'BODYWEIGHT' ? 'bodyweight' : `${value === null ? missing : `${value} ${u?.toLowerCase()}`} ${c ? `· ${loadLabels[c]}` : ''}`.trim()
+}
+export function platesLabel(plates: string[] | undefined, u: string | null) {
+  return plates?.length ? `${[plates.join(' + '), u?.toLowerCase()].filter(Boolean).join(' ')} per side` : ''
 }
