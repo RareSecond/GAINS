@@ -115,3 +115,20 @@ dbTest('rest targets persist through replacement, frozen sessions and exercise h
     assert.ok(history.sets.some(s => s.plannedSet.restSeconds === 90))
   } finally { await cleanup([u.id]) }
 })
+
+dbTest('plate loading persists as decimal strings and is checked by the database', async () => {
+  const u = await createUser()
+  try {
+    const f = await workout(u.id)
+    f.prescription.groups[2].exercises[0].sets[0].platesPerSide = ['15', '5']
+    await updateWorkout(u.id, f.saved.id, 1, randomUUID(), f.prescription)
+    const w = await getWorkout(u.id, f.saved.id)
+    const target = w.groups[2].exercises[0].sets[0]
+    assert.deepEqual(target.platesPerSide, ['15', '5'])
+    assert.deepEqual(w.groups[2].exercises[0].sets[1].platesPerSide, [])
+    await assert.rejects(() => db.plannedSet.update({ where: { id: target.id }, data: { platesPerSide: ['0'] } }))
+    await assert.rejects(() => db.plannedSet.update({ where: { id: target.id }, data: { loadValue: null, loadUnit: null } }))
+    const started = await startSession(u.id, w.id, randomUUID()), s = await getSession(u.id, started.id)
+    assert.deepEqual(s.workout.groups[2].exercises[0].sets[0].platesPerSide, ['15', '5'])
+  } finally { await cleanup([u.id]) }
+})

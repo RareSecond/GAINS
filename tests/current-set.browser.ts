@@ -12,7 +12,7 @@ process.env.PLAYWRIGHT_BROWSERS_PATH ??= `${process.cwd()}/.cache/browsers`
 test('current-set mobile navigation, progression, drafts, corrections and offline recording', { timeout: 60000 }, async t => {
   const now = new Date().toISOString(), id = randomUUID(), catalog = ids().map((id, i) => ({ id, name: fixtureNames[i] }))
   const plan = prescription(catalog.map(e => e.id))
-  plan.groups[2].exercises[0].sets.forEach(s => s.restSeconds = 90)
+  plan.groups[2].exercises[0].sets.forEach(s => { s.restSeconds = 90; s.platesPerSide = ['15', '5'] })
   plan.groups[4].exercises[1].sets.forEach(s => s.restSeconds = 60)
   plan.groups[3].exercises[0].sets = [1, 2, 3, 4].map(setNumber => ({ ...plan.groups[3].exercises[0].sets[0], setNumber, repsMin: 6, repsMax: 8 }))
   const workout = { ...plan, id: randomUUID(), revision: 1, frozenAt: now, sessionId: id, url: '/', groups: plan.groups.map((g, position) => ({ ...g, id: randomUUID(), position, exercises: g.exercises.map((e, position) => ({ ...e, id: randomUUID(), position, nameAtPrescription: catalog.find(c => c.id === e.exerciseId)!.name, sets: e.sets.map(s => ({ ...s, id: randomUUID() })) })) })) }
@@ -142,6 +142,8 @@ test('current-set mobile navigation, progression, drafts, corrections and offlin
     await confirm.click(); await saved()
     assert.equal(session.exercises[3].sets[3].actualReps, 0)
     await select(2)
+    await focus.getByText('Plates: 15 + 5 kg per side', { exact: true }).waitFor()
+    await page.screenshot({ path: 'test-results/plates-mobile.png', fullPage: true })
     await focus.getByText('Adjust reps, load & details', { exact: true }).click()
     assert.equal(await focus.locator('.rep-adjuster output').innerText(), '8')
     assert.equal(await focus.getByRole('spinbutton', { name: /Actual load/ }).inputValue(), '55')
