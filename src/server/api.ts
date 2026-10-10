@@ -4,12 +4,13 @@ import { auth } from './auth'
 import { db } from './db'
 import { config } from './config'
 import { scopes } from './auth-config'
-import { disconnect, ensureExercise, exerciseHistory, getContext, getSession, getWorkout, listExercises, mutateSession, startSession } from './store'
+import { cancelSession, disconnect, ensureExercise, exerciseHistory, getContext, getSession, getWorkout, listExercises, mutateSession, startSession } from './store'
 import { DomainError, name, queuedMutationSchema, uuid } from '../lib/domain'
 import { errorResponse, json, rateLimit, readBody, sameOrigin } from './http'
 const pageSchema = z.object({ limit: z.coerce.number().int().min(1).max(50).default(10), cursor: uuid.optional() })
 const requestSchema = z.discriminatedUnion('action', [
   z.strictObject({ action: z.literal('start'), workoutId: uuid, operationId: uuid }),
+  z.strictObject({ action: z.literal('cancel'), sessionId: uuid, expectedRevision: z.number().int().min(1), operationId: uuid }),
   z.strictObject({ action: z.literal('mutate'), sessionId: uuid, mutation: queuedMutationSchema }),
   z.strictObject({ action: z.literal('ensureExercise'), name, operationId: uuid }),
   z.strictObject({ action: z.literal('disconnect') }),
@@ -47,6 +48,7 @@ export async function api(request: Request) {
     const body = requestSchema.parse(await readBody(request))
     switch (body.action) {
       case 'start': return json(await startSession(userId, body.workoutId, body.operationId))
+      case 'cancel': return json(await cancelSession(userId, body.sessionId, body.expectedRevision, body.operationId))
       case 'mutate': { const outcome = await mutateSession(userId, body.sessionId, body.mutation); return json({ ...outcome, session: await getSession(userId, body.sessionId) }) }
       case 'ensureExercise': return json(await ensureExercise(userId, body.name, body.operationId))
       case 'disconnect': return json(await disconnect(userId))

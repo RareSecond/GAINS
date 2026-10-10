@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { db, createUser, workout, cleanup, requireTestDB } from './db-helper'
-import { createWorkout, deleteWorkout, ensureExercise, exerciseHistory, getContext, getSession, getWorkout, listExercises, mutateSession, startSession, updateWorkout } from '../src/server/store'
+import { cancelSession, createWorkout, deleteWorkout, ensureExercise, exerciseHistory, getContext, getSession, getWorkout, listExercises, mutateSession, startSession, updateWorkout } from '../src/server/store'
 import { counts, type Operation } from '../src/lib/domain'
 import { measurements } from './fixture'
 const dbTest = (title: string, run: () => Promise<void>) => test(title, { skip: !process.env.DATABASE_URL }, run)
@@ -131,4 +131,30 @@ dbTest('plate loading persists as decimal strings and is checked by the database
     const started = await startSession(u.id, w.id, randomUUID()), s = await getSession(u.id, started.id)
     assert.deepEqual(s.workout.groups[2].exercises[0].sets[0].platesPerSide, ['15', '5'])
   } finally { await cleanup([u.id]) }
+})
+
+dbTest('cancelling an accidental start returns the workout to upcoming until work is completed', async () => {
+  const u = await createUser(), other = await createUser()
+  try {
+    const f = await workout(u.id)
+    const started = await startSession(u.id, f.saved.id, randomUUID())
+    await assert.rejects(() => cancelSession(other.id, started.id, 1, randomUUID()), /not found/)
+    // Skips and extra pending work do not make a session history; the revision still guards other devices.
+    await mutateSession(u.id, started.id, { operationId: randomUUID(), expectedRevision: 1, operation: { kind: 'skipExercise', exerciseRowId: (await getSession(u.id, started.id)).exercises[0].id, notes: null } })
+    await assert.rejects(() => cancelSession(u.id, started.id, 1, randomUUID()), /changed/)
+    const operationId = randomUUID(), cancelled = await cancelSession(u.id, started.id, 2, operationId)
+    assert.deepEqual(await cancelSession(u.id, started.id, 2, operationId), cancelled)
+    await assert.rejects(() => getSession(u.id, started.id), /not found/)
+    const w = await getWorkout(u.id, f.saved.id); assert.equal(w.frozenAt, null); assert.equal(w.sessionId, null)
+    const context = await getContext(u.id); assert.equal(context.active, null); assert.ok(context.upcoming.some(x => x.id === f.saved.id))
+    // Released prescriptions are editable again and can be started afresh.
+    await updateWorkout(u.id, f.saved.id, 1, randomUUID(), f.prescription)
+    const again = await startSession(u.id, f.saved.id, randomUUID()); assert.notEqual(again.id, started.id)
+    const s = await getSession(u.id, again.id)
+    await mutateSession(u.id, s.id, { operationId: randomUUID(), expectedRevision: 1, operation: { kind: 'record', setId: s.exercises[2].sets[0].id, measurements: measurements() } })
+    await assert.rejects(() => cancelSession(u.id, s.id, 2, randomUUID()), /Completed sets/)
+    await mutateSession(u.id, s.id, { operationId: randomUUID(), expectedRevision: 2, operation: { kind: 'finish', notes: null } })
+    await assert.rejects(() => cancelSession(u.id, s.id, 3, randomUUID()), /finished/)
+    assert.equal((await getSession(u.id, s.id)).status, 'FINISHED')
+  } finally { await cleanup([u.id, other.id]) }
 })
