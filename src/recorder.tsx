@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Volume2, VolumeX } from 'lucide-react'
-import { counts, executionOrder, loadLabel, loadLabels, platesLabel, measurementsSchema, targetFor, type Measurements, type Operation, type RecordedExercise, type RecordedSet, type Session } from './lib/domain'
+import { counts, durationLabel, executionOrder, loadLabel, loadLabels, platesLabel, measurementsSchema, targetFor, type Measurements, type Operation, type RecordedExercise, type RecordedSet, type Session } from './lib/domain'
 import { apiGet, apiPost, ApiError } from './lib/api-client'
 import { cacheSession, editLocal, readLocal, sessionKey, syncSession, watchLocal, type Profile } from './lib/local'
 import { enqueue, projected, reapply, type Draft, type LocalSession } from './lib/outbox'
@@ -138,11 +138,11 @@ export function Recorder({ profile, id }: { profile: Profile; id: string }) {
   const readonly = session.status === 'FINISHED' || !!record.conflict || !!record.blocked || !!storageError
   const pendingFinish = record.queue.some(q => q.operation.kind === 'finish')
   return <div className={active ? 'recorder focused-recorder' : 'recorder'}>
-    {active ? <header className="session-header"><a className="back" href="/" aria-label="Back to your training">←</a><div><p className="eyebrow">SESSION IN PROGRESS</p><h2>{session.workout.title}</h2></div><button className="text-button" disabled={readonly} onClick={() => setFinish(true)}>Finish</button></header> : <><a className="back" href="/">← Your training</a><div className="page-heading"><p className="eyebrow">{pendingFinish ? 'FINISH PENDING SYNCHRONIZATION' : 'SESSION FINISHED'}</p><h1>{session.workout.title}</h1><p>{session.workout.notes}</p></div></>}
+    {active ? <header className="session-header"><a className="back" href="/" aria-label="Back to your training">←</a><div><p className="eyebrow">SESSION IN PROGRESS</p><h2>{session.workout.title}</h2></div><WorkoutClock startedAt={session.startedAt} /><button className="text-button" disabled={readonly} onClick={() => setFinish(true)}>Finish</button></header> : <><a className="back" href="/">← Your training</a><div className="page-heading"><p className="eyebrow">{pendingFinish ? 'FINISH PENDING SYNCHRONIZATION' : 'SESSION FINISHED'}</p><h1>{session.workout.title}</h1><p>{session.workout.notes}</p></div></>}
     {active && <div className="session-progress"><progress aria-label="Workout progress" value={totals.completed + totals.skipped} max={order.length || 1} /><span>{totals.completed} completed · {totals.unrecorded} to go{totals.skipped ? ` · ${totals.skipped} skipped` : ''}</span></div>}
     {offline && <p className="notice" role="status">Offline · {record.queue.length} changes retained. They will sync when you reconnect.</p>}
     {(error || storageError) && <div className="notice warning" role="alert"><p>{storageError || error}</p>{record.queue.length > 0 && !record.conflict && !record.blocked && !storageError && !offline && <button className="secondary" onClick={synchronize} disabled={saving}>Retry</button>}</div>}
-    {!active && <div className="scoreboard"><div><strong>{totals.completed}</strong><span>completed</span></div><div><strong>{totals.skipped}</strong><span>skipped</span></div><div><strong>{totals.unrecorded}</strong><span>unrecorded</span></div></div>}
+    {!active && <div className="scoreboard"><div><strong>{totals.completed}</strong><span>completed</span></div><div><strong>{totals.skipped}</strong><span>skipped</span></div><div><strong>{totals.unrecorded}</strong><span>unrecorded</span></div>{session.finishedAt && <div><strong>{durationLabel(session.startedAt, session.finishedAt)}</strong><span>total time</span></div>}</div>}
     {(record.conflict || record.blocked) && <section className="notice warning"><h2>Your changes need attention</h2><p>{record.blocked ?? 'Another device changed this session. Your local entries are retained below.'}</p>{record.conflict && <><p>Server revision {record.conflict.revision} · {record.conflict.status.toLowerCase()} · {JSON.stringify(counts(record.conflict))}</p><details><summary>Compare server and retained local records</summary><div className="comparison"><div><h3>Server</h3><Comparison session={record.conflict} /></div><div><h3>Your retained version</h3><Comparison session={session} /></div></div></details></>}
       <button className="secondary" onClick={() => resolve(true)}>Use server version · discard retained edits</button>{record.conflict?.status === 'ACTIVE' && <button onClick={() => resolve(false)}>Reapply compatible local changes</button>}<button className="secondary" onClick={() => { const url = URL.createObjectURL(new Blob([JSON.stringify(record, null, 2)], { type: 'application/json' })); const a = document.createElement('a'); a.href = url; a.download = 'gains-retained-changes.json'; a.click(); URL.revokeObjectURL(url) }}>Export retained changes</button>
     </section>}
@@ -168,6 +168,17 @@ export function Recorder({ profile, id }: { profile: Profile; id: string }) {
     {cancelOperation && <Dialog title="cancel-title" onClose={() => setCancelOperation(undefined)}><h2 id="cancel-title">Cancel this workout?</h2>{error && <p role="alert">{error}</p>}<p>Nothing has been completed yet. Cancelling discards this session and returns {session.workout.title} to your upcoming workouts, unchanged. It will not appear in your history.</p><button disabled={cancelling} onClick={() => cancelWorkout(cancelOperation, record.base.revision, session.workout.id)}>{cancelling ? 'Cancelling…' : 'Cancel workout'}</button><button className="secondary" autoFocus disabled={cancelling} onClick={() => setCancelOperation(undefined)}>Keep training</button></Dialog>}
     {selection && <ExercisePicker catalog={catalog} onCatalog={setCatalog} selection={selection} onClose={() => setSelection(undefined)} onSelect={async e => { await mutate(selection.mode === 'extra' ? { kind: 'addExercise', exerciseId: e.id, newExerciseRowId: crypto.randomUUID(), notes: null } : { kind: 'substitute', exerciseRowId: selection.exercise!.id, exerciseId: e.id, newExerciseRowId: crypto.randomUUID(), notes: null }, e); setSelection(undefined) }} />}
   </div>
+}
+function WorkoutClock({ startedAt }: { startedAt: string }) {
+  const [now, setNow] = useState(Date.now)
+  useEffect(() => {
+    const tick = () => setNow(Date.now())
+    const timer = window.setInterval(tick, 1000)
+    document.addEventListener('visibilitychange', tick)
+    return () => { window.clearInterval(timer); document.removeEventListener('visibilitychange', tick) }
+  }, [])
+  const label = durationLabel(startedAt, now)
+  return <div className="workout-clock"><strong>{label}</strong><span>total time</span></div>
 }
 function RestTimer({ until, onSkip, onComplete, sound, onSound }: { until: number; onSkip: () => Promise<void>; onComplete: (alert: boolean) => void; sound: boolean; onSound: () => void }) {
   const [now, setNow] = useState(Date.now)

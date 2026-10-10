@@ -165,6 +165,8 @@ test('current-set mobile navigation, progression, drafts, corrections and offlin
     await page.getByRole('region', { name: 'Rest timer' }).waitFor({ state: 'hidden' })
     assert.equal(await restDeadline(), undefined, 'Expiry must clear the retained rest timer')
     assert.equal(await beeps(), 1, 'Completion must play the rest alert')
+    const [minutes, seconds] = (await page.locator('.workout-clock strong').innerText()).split(':').map(Number)
+    assert.ok(minutes * 60 + seconds >= 101, 'Workout clock must count from the session start')
     await page.clock.fastForward(5000)
     await page.evaluate(() => window.dispatchEvent(new Event('focus')))
     assert.equal(await beeps(), 1, 'Expiry and focus must not repeat the alert')
@@ -233,6 +235,7 @@ test('current-set mobile navigation, progression, drafts, corrections and offlin
     await page.getByRole('button', { name: 'Finish', exact: true }).click()
     await page.getByRole('button', { name: 'Finish workout', exact: true }).click()
     await page.getByText('SESSION FINISHED', { exact: true }).waitFor()
+    await page.locator('.scoreboard').getByText('total time', { exact: true }).waitFor()
     assert.equal(await page.getByRole('button', { name: 'Confirm completed set' }).count(), 0)
     session = { ...session, id: randomUUID(), status: 'ACTIVE', finishedAt: null, exercises: session.exercises.map(e => ({ ...e, sets: e.sets.map(s => s.status === 'PENDING' ? { ...s, status: 'SKIPPED' as const } : s) })) }
     await page.goto(`http://127.0.0.1:3107/sessions/${session.id}`)

@@ -142,3 +142,9 @@ export function loadLabel(value: string | null, u: string | null, c: z.infer<typ
 export function platesLabel(plates: string[] | undefined, u: string | null) {
   return plates?.length ? `${[plates.join(' + '), u?.toLowerCase()].filter(Boolean).join(' ')} per side` : ''
 }
+// Elapsed wall-clock time as m:ss or h:mm:ss. Clamped at zero for device/server clock skew.
+export function durationLabel(from: string | number, to: string | number) {
+  const total = Math.max(0, Math.floor((new Date(to).getTime() - new Date(from).getTime()) / 1000))
+  const h = Math.floor(total / 3600), m = Math.floor(total / 60) % 60, s = String(total % 60).padStart(2, '0')
+  return h ? `${h}:${String(m).padStart(2, '0')}:${s}` : `${m}:${s}`
+}
