@@ -139,7 +139,7 @@ test('current-set mobile navigation, progression, drafts, corrections and offlin
     }
     await adjustReps(0)
     assert.equal(await focus.getByRole('button', { name: 'Decrease reps' }).isDisabled(), true)
-    await confirm.click(); await saved()
+    await focus.locator('.recording-adjustments').getByRole('button', { name: /^Complete set 0 reps/ }).click(); await saved()
     assert.equal(session.exercises[3].sets[3].actualReps, 0)
     await select(2)
     await focus.getByText('Plates: 15 + 5 kg per side', { exact: true }).waitFor()
@@ -157,7 +157,7 @@ test('current-set mobile navigation, progression, drafts, corrections and offlin
     assert.equal(await restDeadline(), deadline, 'Reload must retain the rest deadline')
     await select(2, 0)
     await adjustReps(7)
-    await focus.getByRole('button', { name: 'Save correction' }).click(); await saved()
+    await focus.getByRole('button', { name: 'Save correction', exact: true }).click(); await saved()
     assert.equal(session.exercises[2].sets[0].actualReps, 7)
     assert.equal(await restDeadline(), deadline, 'Correction must not restart rest')
     await page.screenshot({ path: 'test-results/rest-timer-mobile.png', fullPage: true })
@@ -243,7 +243,7 @@ test('current-set mobile navigation, progression, drafts, corrections and offlin
     assert.equal(await page.getByRole('region', { name: 'Current set', exact: true }).count(), 0)
     await page.getByText('Workout overview', { exact: false }).first().click()
     await page.locator('.workout-overview').locator(`#set-${session.exercises[2].sets[0].id}`).locator('..').getByRole('button', { name: 'Open set 1 →', exact: true }).click()
-    await focus.getByRole('button', { name: 'Save correction' }).waitFor()
+    await focus.getByRole('button', { name: 'Save correction', exact: true }).waitFor()
     assert.deepEqual(errors, [])
   } catch (error) {
     await page.screenshot({ path: 'test-results/current-set-failure.png', fullPage: true })
