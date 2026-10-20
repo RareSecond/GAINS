@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
-import { applyOperation, blankMeasurements, counts, executionOrder, loadLabel, durationLabel, measurementsSchema, plannedSetSchema, platesLabel, prescriptionSchema, type Session } from '../src/lib/domain'
+import { applyOperation, blankMeasurements, counts, executionOrder, loadLabel, durationLabel, measurementsSchema, plannedSetSchema, platesLabel, prescriptionSchema, repsLabel, type Session } from '../src/lib/domain'
 import { acknowledge, enqueue, projected, reapply, type LocalSession } from '../src/lib/outbox'
 import { ids, measurements, prescription } from './fixture'
 function session(p = prescription(ids())): Session {
@@ -122,4 +122,15 @@ test('workout duration formats elapsed wall-clock time', () => {
   assert.equal(durationLabel(start, '2026-10-09T10:52:13.000Z'), '52:13')
   assert.equal(durationLabel(start, '2026-10-09T11:05:07.000Z'), '1:05:07')
   assert.equal(durationLabel(start, '2026-10-09T09:59:30.000Z'), '0:00') // Device clock behind the server.
+})
+
+test('rep goals are optional and must lie within the rep range', () => {
+  const p = prescription(ids()), ranged = p.groups[3].exercises[0].sets[0]
+  assert.equal(ranged.repsGoal, null)
+  for (const repsGoal of [8, 9, 10]) assert.equal(plannedSetSchema.parse({ ...ranged, repsGoal }).repsGoal, repsGoal)
+  for (const repsGoal of [7, 11, 9.5, '9', 0]) assert.throws(() => plannedSetSchema.parse({ ...ranged, repsGoal }))
+  assert.equal(repsLabel({ ...ranged, repsGoal: 9 }), '9 (range 8–10)')
+  assert.equal(repsLabel(ranged), '8–10')
+  assert.equal(repsLabel({ repsMin: 6, repsMax: 6, repsGoal: 6 }), '6')
+  assert.equal(repsLabel({ repsMin: 8, repsMax: 10 }), '8–10') // Sessions cached before rep goals existed.
 })

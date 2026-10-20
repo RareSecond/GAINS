@@ -385,6 +385,7 @@ model PlannedSet {
   side              Side
   repsMin           Int
   repsMax           Int
+  repsGoal          Int?
   loadValue         Decimal?        @db.Decimal(9, 3)
   loadUnit          MassUnit?
   loadConvention    LoadConvention?

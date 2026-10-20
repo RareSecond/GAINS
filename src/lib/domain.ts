@@ -11,12 +11,14 @@ const nullable = <T extends z.ZodType>(schema: T) => schema.nullable().default(n
 const loadFields = { loadValue: nullable(mass), loadUnit: nullable(unit), loadConvention: nullable(convention) }
 export const plannedSetSchema = z.strictObject({
   setNumber: z.number().int().min(1).max(50), side, repsMin: z.number().int().min(1).max(1000), repsMax: z.number().int().min(1).max(1000),
+  repsGoal: nullable(z.number().int().min(1).max(1000).describe('The rep count the user should aim for on this set, within repsMin..repsMax. repsMin/repsMax is the acceptable range used for progression; repsGoal is today\'s aim, e.g. range 6-10 with goals 10/9/9 across three sets. Null when the whole range is the target.')),
   restSeconds: nullable(z.number().int().min(0).max(3600).describe('Rest after this set in seconds; null is unspecified, zero means no rest. For supersets/circuits, put the round rest on the last exercise/side.')),
   ...loadFields,
   platesPerSide: z.array(mass.refine(v => Number(v) > 0, 'Plates must weigh more than zero')).max(20).default([]).describe('Plates to load on each side of the bar, sled or loadable handle for this set, heaviest first, in the set load unit. Choose them from the plates the user has; empty when plates do not apply (fixed dumbbells, machines with a stack, bodyweight). Bar or handle weight plus both sides should equal the load.'),
   rpeMin: nullable(z.number().min(0).max(10).multipleOf(0.01)), rpeMax: nullable(z.number().min(0).max(10).multipleOf(0.01)),
 }).superRefine((s, ctx) => {
   if (s.repsMin > s.repsMax) ctx.addIssue({ code: 'custom', path: ['repsMax'], message: 'Maximum must be at least minimum reps' })
+  if (s.repsGoal !== null && (s.repsGoal < s.repsMin || s.repsGoal > s.repsMax)) ctx.addIssue({ code: 'custom', path: ['repsGoal'], message: 'Rep goal must lie within the rep range' })
   if ((s.rpeMin === null) !== (s.rpeMax === null) || (s.rpeMin !== null && s.rpeMax !== null && s.rpeMin > s.rpeMax)) ctx.addIssue({ code: 'custom', path: ['rpeMax'], message: 'Provide an ordered RPE range or neither bound' })
   checkLoad(s.loadValue, s.loadUnit, s.loadConvention, ctx)
   if (s.platesPerSide.length && s.loadValue === null) ctx.addIssue({ code: 'custom', path: ['platesPerSide'], message: 'Plates need a numeric load' })
@@ -25,7 +27,7 @@ function checkLoad(value: string | null, u: string | null, c: string | null, ctx
   if (value !== null && (!u || !c || c === 'BODYWEIGHT')) ctx.addIssue({ code: 'custom', message: 'Numeric mass needs unit and convention; bodyweight has no numeric mass' })
   if (value === null && u !== null) ctx.addIssue({ code: 'custom', message: 'A unit requires a numeric mass' })
 }
-export const exercisePrescriptionSchema = z.strictObject({ exerciseId: uuid, optional: z.boolean().default(false), sideMode: z.enum(['BILATERAL', 'PER_SIDE']), instructions: nullable(text), sets: z.array(plannedSetSchema).min(1).max(100) }).superRefine((e, ctx) => {
+export const exercisePrescriptionSchema = z.strictObject({ exerciseId: uuid, optional: z.boolean().default(false), sideMode: z.enum(['BILATERAL', 'PER_SIDE']), instructions: nullable(text.describe('Technique cues and context. Do not restate reps, goals, loads, RPE or rest that have their own set fields.')), sets: z.array(plannedSetSchema).min(1).max(100) }).superRefine((e, ctx) => {
   const keys = new Set<string>()
   const numbers = [...new Set(e.sets.map(s => s.setNumber))].sort((a, b) => a - b)
   if (numbers.some((n, i) => n !== i + 1)) ctx.addIssue({ code: 'custom', path: ['sets'], message: 'Set numbers must be consecutive from one' })
@@ -138,6 +140,11 @@ export function targetFor(s: Session, set: RecordedSet) { return s.workout.group
 export const loadLabels: Record<z.infer<typeof convention>, string> = { TOTAL_EXTERNAL: 'total', PER_DUMBBELL: 'per dumbbell', ADDED: 'added', ASSISTANCE: 'assistance', BODYWEIGHT: 'bodyweight' }
 export function loadLabel(value: string | null, u: string | null, c: z.infer<typeof convention> | null, missing = 'unspecified load') {
   return c === 'BODYWEIGHT' ? 'bodyweight' : `${value === null ? missing : `${value} ${u?.toLowerCase()}`} ${c ? `· ${loadLabels[c]}` : ''}`.trim()
+}
+// Sessions cached before rep goals existed have no repsGoal key.
+export function repsLabel(t: { repsMin: number; repsMax: number; repsGoal?: number | null }) {
+  const range = t.repsMin === t.repsMax ? `${t.repsMin}` : `${t.repsMin}–${t.repsMax}`
+  return t.repsGoal == null || t.repsMin === t.repsMax ? range : `${t.repsGoal} (range ${range})`
 }
 export function platesLabel(plates: string[] | undefined, u: string | null) {
   return plates?.length ? `${[plates.join(' + '), u?.toLowerCase()].filter(Boolean).join(' ')} per side` : ''
