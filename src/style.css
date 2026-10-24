@@ -19,3 +19,4 @@
 .rest-timer .rest-sound{position:absolute;top:8px;right:8px;width:44px;min-width:44px;min-height:44px;padding:0;margin:0;border:0;background:transparent;color:inherit}
 .rest-timer .rest-sound:hover{background:#11151212}
 .rest-timer .rest-sound:focus-visible{outline-color:currentColor}
+.badge.set-kind{color:#efe3bd;border-color:#6d592e}

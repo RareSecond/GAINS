@@ -1,13 +1,13 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
-import { applyOperation, blankMeasurements, counts, executionOrder, loadLabel, durationLabel, measurementsSchema, plannedSetSchema, platesLabel, prescriptionSchema, repsLabel, type Session } from '../src/lib/domain'
+import { applyOperation, blankMeasurements, counts, executionOrder, loadLabel, durationLabel, measurementsSchema, plannedSetSchema, platesLabel, prescriptionSchema, repsLabel, setKindLabel, type Session } from '../src/lib/domain'
 import { acknowledge, enqueue, projected, reapply, type LocalSession } from '../src/lib/outbox'
 import { ids, measurements, prescription } from './fixture'
 function session(p = prescription(ids())): Session {
   const sessionId = randomUUID()
   const workout = { ...p, id: randomUUID(), revision: 1, frozenAt: new Date().toISOString(), sessionId, url: '/', groups: p.groups.map((g, position) => ({ ...g, position, id: randomUUID(), exercises: g.exercises.map((e, position) => ({ ...e, position, id: randomUUID(), nameAtPrescription: 'Exercise', sets: e.sets.map(s => ({ ...s, id: randomUUID() })) })) })) }
-  return { id: sessionId, status: 'ACTIVE', revision: 1, notes: null, startedAt: new Date().toISOString(), updatedAt: new Date().toISOString(), finishedAt: null, asOf: new Date().toISOString(), workout, exercises: workout.groups.flatMap(g => g.exercises).map((e, position) => { const id = randomUUID(); return { id, exerciseId: e.exerciseId, workoutExerciseId: e.id, nameAtRecording: e.nameAtPrescription, position, notes: null, sets: e.sets.map((s, position) => ({ id: randomUUID(), sessionExerciseId: id, plannedSetId: s.id, setNumber: s.setNumber, side: s.side, position, status: 'PENDING', ...blankMeasurements() })) } }) }
+  return { id: sessionId, status: 'ACTIVE', revision: 1, notes: null, startedAt: new Date().toISOString(), updatedAt: new Date().toISOString(), finishedAt: null, asOf: new Date().toISOString(), workout, exercises: workout.groups.flatMap(g => g.exercises).map((e, position) => { const id = randomUUID(); return { id, exerciseId: e.exerciseId, workoutExerciseId: e.id, nameAtRecording: e.nameAtPrescription, position, notes: null, sets: e.sets.map((s, position) => ({ id: randomUUID(), sessionExerciseId: id, plannedSetId: s.id, setNumber: s.setNumber, side: s.side, kind: s.kind, position, status: 'PENDING', ...blankMeasurements() })) } }) }
 }
 test('validates targets, loads, ranges, sides and finite workout boundaries', () => {
   const p = prescription(ids()); assert.equal(p.groups[4].exercises[0].sets.length, 4)
@@ -33,7 +33,7 @@ test('prescription/result boundary, substitution, sides, round traversal and ear
   assert.equal(s.exercises.find(e => e.id === newRow)!.sets.length, 3)
   const right = s.exercises.find(e => e.id === newRow)!.sets[0]
   s = applyOperation(s, { kind: 'record', setId: right.id, measurements: measurements(7, '50') })
-  const extra = randomUUID(); s = applyOperation(s, { kind: 'addSet', exerciseRowId: original.id, newSetId: extra, side: 'LEFT' })
+  const extra = randomUUID(); s = applyOperation(s, { kind: 'addSet', exerciseRowId: original.id, newSetId: extra, side: 'LEFT', setKind: 'WORKING' })
   s = applyOperation(s, { kind: 'record', setId: extra, measurements: measurements(0) })
   assert.throws(() => applyOperation(s, { kind: 'removeSet', setId: extra }))
   s = applyOperation(s, { kind: 'skipSet', setId: s.exercises[0].sets[0].id, notes: null })
@@ -133,4 +133,21 @@ test('rep goals are optional and must lie within the rep range', () => {
   assert.equal(repsLabel(ranged), '8–10')
   assert.equal(repsLabel({ repsMin: 6, repsMax: 6, repsGoal: 6 }), '6')
   assert.equal(repsLabel({ repsMin: 8, repsMax: 10 }), '8–10') // Sessions cached before rep goals existed.
+})
+
+test('set kinds default to working, are closed, and carry onto extra sets', () => {
+  const p = prescription(ids()), bench = p.groups[2].exercises[0].sets[0]
+  assert.equal(bench.kind, 'WORKING')
+  for (const kind of ['WARMUP', 'WORKING', 'BACKOFF', 'DROP']) assert.equal(plannedSetSchema.parse({ ...bench, kind }).kind, kind)
+  for (const kind of ['warmup', 'AMRAP', null, 1]) assert.throws(() => plannedSetSchema.parse({ ...bench, kind }))
+  let s = session()
+  const row = s.exercises[2], warmup = randomUUID(), legacy = randomUUID()
+  s = applyOperation(s, { kind: 'addSet', exerciseRowId: row.id, newSetId: warmup, side: 'BOTH', setKind: 'WARMUP' })
+  assert.equal(s.exercises[2].sets.find(x => x.id === warmup)!.kind, 'WARMUP')
+  // Operations queued before set kinds existed omit it.
+  s = applyOperation(s, { kind: 'addSet', exerciseRowId: row.id, newSetId: legacy, side: 'BOTH' } as never)
+  assert.equal(s.exercises[2].sets.find(x => x.id === legacy)!.kind, 'WORKING')
+  assert.equal(setKindLabel('WARMUP'), 'Warm-up'); assert.equal(setKindLabel('DROP'), 'Drop set')
+  assert.equal(setKindLabel('WORKING'), '')
+  assert.equal(setKindLabel(undefined), '') // Sessions cached before set kinds existed.
 })

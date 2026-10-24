@@ -311,6 +311,13 @@ enum TrainingStatus {
   FINISHED
 }
 
+enum SetKind {
+  WARMUP
+  WORKING
+  BACKOFF
+  DROP
+}
+
 enum SetStatus {
   PENDING
   COMPLETED
@@ -383,6 +390,7 @@ model PlannedSet {
   exercise          WorkoutExercise @relation(fields: [workoutExerciseId], references: [id], onDelete: Cascade)
   setNumber         Int
   side              Side
+  kind              SetKind         @default(WORKING)
   repsMin           Int
   repsMax           Int
   repsGoal          Int?
@@ -445,6 +453,7 @@ model SessionSet {
   plannedSet           PlannedSet?     @relation(fields: [plannedSetId], references: [id], onDelete: Restrict)
   setNumber            Int
   side                 Side
+  kind                 SetKind         @default(WORKING)
   position             Int
   status               SetStatus       @default(PENDING)
   actualReps           Int?

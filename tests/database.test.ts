@@ -74,7 +74,7 @@ dbTest('actual overrides, retries, substitutions, extras, unilateral differences
     await mutate({ kind: 'record', setId: left.id, measurements: measurements(8, '20.125') }); await mutate({ kind: 'record', setId: right.id, measurements: measurements(7, '20.125') })
     const extraRow = randomUUID(), extraSet = randomUUID()
     await mutate({ kind: 'addExercise', exerciseId: f.catalog[8].id, newExerciseRowId: extraRow, notes: 'Extra work' })
-    await mutate({ kind: 'addSet', exerciseRowId: extraRow, newSetId: extraSet, side: 'BOTH' })
+    await mutate({ kind: 'addSet', exerciseRowId: extraRow, newSetId: extraSet, side: 'BOTH', setKind: 'WORKING' })
     await mutate({ kind: 'record', setId: extraSet, measurements: { ...measurements(6, '40'), actualLoadConvention: 'ASSISTANCE' } })
     await assert.rejects(() => mutate({ kind: 'removeSet', setId: extraSet }), /uncompleted/)
     await mutate({ kind: 'skipExercise', exerciseRowId: s.exercises[0].id, notes: 'Optional jumps skipped' })
@@ -150,6 +150,29 @@ dbTest('plate loading persists as decimal strings and is checked by the database
     await assert.rejects(() => db.plannedSet.update({ where: { id: target.id }, data: { loadValue: null, loadUnit: null } }))
     const started = await startSession(u.id, w.id, randomUUID()), s = await getSession(u.id, started.id)
     assert.deepEqual(s.workout.groups[2].exercises[0].sets[0].platesPerSide, ['15', '5'])
+  } finally { await cleanup([u.id]) }
+})
+
+dbTest('set kinds persist on planned sets and carry into the session and history', async () => {
+  const u = await createUser()
+  try {
+    const f = await workout(u.id)
+    const bench = f.prescription.groups[2].exercises[0]
+    bench.sets = [{ ...bench.sets[0], kind: 'WARMUP', loadValue: '20' }, ...bench.sets.map(x => ({ ...x, setNumber: x.setNumber + 1 }))]
+    bench.sets[2].kind = 'BACKOFF'
+    await updateWorkout(u.id, f.saved.id, 1, randomUUID(), f.prescription)
+    const w = await getWorkout(u.id, f.saved.id)
+    assert.deepEqual(w.groups[2].exercises[0].sets.map(x => x.kind), ['WARMUP', 'WORKING', 'BACKOFF'])
+    assert.equal(w.groups[1].exercises[0].sets[0].kind, 'WORKING')
+    const started = await startSession(u.id, w.id, randomUUID()), s = await getSession(u.id, started.id)
+    assert.deepEqual(s.exercises[2].sets.map(x => x.kind), ['WARMUP', 'WORKING', 'BACKOFF'])
+    const extra = randomUUID()
+    await mutateSession(u.id, s.id, { operationId: randomUUID(), expectedRevision: 1, operation: { kind: 'addSet', exerciseRowId: s.exercises[2].id, newSetId: extra, side: 'BOTH', setKind: 'DROP' } })
+    await mutateSession(u.id, s.id, { operationId: randomUUID(), expectedRevision: 2, operation: { kind: 'record', setId: extra, measurements: measurements(8, '40') } })
+    assert.equal((await getSession(u.id, s.id)).exercises[2].sets.find(x => x.id === extra)!.kind, 'DROP')
+    const history = await exerciseHistory(u.id, f.catalog[2].id) as { sets: { id: string; kind: string; plannedSet: { kind: string } | null }[] }
+    assert.equal(history.sets.find(x => x.id === extra)!.kind, 'DROP')
+    assert.ok(history.sets.some(x => x.kind === 'WARMUP' && x.plannedSet?.kind === 'WARMUP'))
   } finally { await cleanup([u.id]) }
 })
 

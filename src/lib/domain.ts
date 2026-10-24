@@ -4,13 +4,16 @@ export const uuid = z.uuid()
 export const text = z.string().trim().max(2000)
 export const name = z.string().trim().min(1).max(120)
 export const side = z.enum(['BOTH', 'LEFT', 'RIGHT'])
+export const setKind = z.enum(['WARMUP', 'WORKING', 'BACKOFF', 'DROP'])
 export const unit = z.enum(['KG', 'LB'])
 export const convention = z.enum(['TOTAL_EXTERNAL', 'PER_DUMBBELL', 'ADDED', 'ASSISTANCE', 'BODYWEIGHT'])
 export const mass = z.string().regex(/^(0|[1-9]\d{0,5})(\.\d{1,3})?$/, 'Use a nonnegative decimal, up to 3 decimal places')
 const nullable = <T extends z.ZodType>(schema: T) => schema.nullable().default(null)
 const loadFields = { loadValue: nullable(mass), loadUnit: nullable(unit), loadConvention: nullable(convention) }
 export const plannedSetSchema = z.strictObject({
-  setNumber: z.number().int().min(1).max(50), side, repsMin: z.number().int().min(1).max(1000), repsMax: z.number().int().min(1).max(1000),
+  setNumber: z.number().int().min(1).max(50), side,
+  kind: setKind.default('WORKING').describe('What the set is for. WARMUP: ramp-up sets before the working weight; they are not part of progression. WORKING: the sets the prescription is about. BACKOFF: lighter sets after the top/working sets. DROP: an immediate load reduction continuing the previous set, usually with zero rest before it. Number warm-ups first, in the order performed.'),
+  repsMin: z.number().int().min(1).max(1000), repsMax: z.number().int().min(1).max(1000),
   repsGoal: nullable(z.number().int().min(1).max(1000).describe('The rep count the user should aim for on this set, within repsMin..repsMax. repsMin/repsMax is the acceptable range used for progression; repsGoal is today\'s aim, e.g. range 6-10 with goals 10/9/9 across three sets. Null when the whole range is the target.')),
   restSeconds: nullable(z.number().int().min(0).max(3600).describe('Rest after this set in seconds; null is unspecified, zero means no rest. For supersets/circuits, put the round rest on the last exercise/side.')),
   ...loadFields,
@@ -27,7 +30,7 @@ function checkLoad(value: string | null, u: string | null, c: string | null, ctx
   if (value !== null && (!u || !c || c === 'BODYWEIGHT')) ctx.addIssue({ code: 'custom', message: 'Numeric mass needs unit and convention; bodyweight has no numeric mass' })
   if (value === null && u !== null) ctx.addIssue({ code: 'custom', message: 'A unit requires a numeric mass' })
 }
-export const exercisePrescriptionSchema = z.strictObject({ exerciseId: uuid, optional: z.boolean().default(false), sideMode: z.enum(['BILATERAL', 'PER_SIDE']), instructions: nullable(text.describe('Technique cues and context. Do not restate reps, goals, loads, RPE or rest that have their own set fields.')), sets: z.array(plannedSetSchema).min(1).max(100) }).superRefine((e, ctx) => {
+export const exercisePrescriptionSchema = z.strictObject({ exerciseId: uuid, optional: z.boolean().default(false), sideMode: z.enum(['BILATERAL', 'PER_SIDE']), instructions: nullable(text.describe('Technique cues and context. Do not restate reps, goals, loads, plates, RPE, rest or warm-up/back-off sets that have their own set fields.')), sets: z.array(plannedSetSchema).min(1).max(100) }).superRefine((e, ctx) => {
   const keys = new Set<string>()
   const numbers = [...new Set(e.sets.map(s => s.setNumber))].sort((a, b) => a - b)
   if (numbers.some((n, i) => n !== i + 1)) ctx.addIssue({ code: 'custom', path: ['sets'], message: 'Set numbers must be consecutive from one' })
@@ -49,7 +52,7 @@ export type PlannedExercise = Omit<z.infer<typeof exercisePrescriptionSchema>, '
 export type Workout = Omit<Prescription, 'groups'> & { id: string; revision: number; frozenAt: string | null; sessionId: string | null; url: string; groups: { id: string; position: number; kind: 'STRAIGHT' | 'SUPERSET' | 'CIRCUIT'; instructions: string | null; exercises: PlannedExercise[] }[] }
 export const measurementsSchema = z.strictObject({ actualReps: z.number().int().min(0).max(1000), actualLoadValue: nullable(mass), actualLoadUnit: nullable(unit), actualLoadConvention: nullable(convention), actualRpe: nullable(z.number().min(0).max(10).multipleOf(0.01)), notes: nullable(text) }).superRefine((s, ctx) => checkLoad(s.actualLoadValue, s.actualLoadUnit, s.actualLoadConvention, ctx))
 export type Measurements = z.infer<typeof measurementsSchema>
-export type RecordedSet = Omit<Measurements, 'actualReps'> & { id: string; sessionExerciseId: string; plannedSetId: string | null; setNumber: number; side: z.infer<typeof side>; position: number; status: 'PENDING' | 'COMPLETED' | 'SKIPPED'; actualReps: number | null; completedAt: string | null }
+export type RecordedSet = Omit<Measurements, 'actualReps'> & { id: string; sessionExerciseId: string; plannedSetId: string | null; setNumber: number; side: z.infer<typeof side>; kind: SetKind; position: number; status: 'PENDING' | 'COMPLETED' | 'SKIPPED'; actualReps: number | null; completedAt: string | null }
 export type RecordedExercise = { id: string; exerciseId: string; workoutExerciseId: string | null; nameAtRecording: string; position: number; notes: string | null; sets: RecordedSet[] }
 export type Session = { id: string; revision: number; status: 'ACTIVE' | 'FINISHED'; startedAt: string; finishedAt: string | null; updatedAt: string; asOf: string; notes: string | null; workout: Workout; exercises: RecordedExercise[] }
 export const operationSchema = z.discriminatedUnion('kind', [
@@ -58,7 +61,7 @@ export const operationSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('skipExercise'), exerciseRowId: uuid, notes: nullable(text) }),
   z.strictObject({ kind: z.literal('substitute'), exerciseRowId: uuid, exerciseId: uuid, newExerciseRowId: uuid, notes: nullable(text) }),
   z.strictObject({ kind: z.literal('addExercise'), exerciseId: uuid, newExerciseRowId: uuid, notes: nullable(text) }),
-  z.strictObject({ kind: z.literal('addSet'), exerciseRowId: uuid, newSetId: uuid, side }),
+  z.strictObject({ kind: z.literal('addSet'), exerciseRowId: uuid, newSetId: uuid, side, setKind: setKind.default('WORKING') }),
   z.strictObject({ kind: z.literal('removeSet'), setId: uuid }),
   z.strictObject({ kind: z.literal('removeExercise'), exerciseRowId: uuid }),
   z.strictObject({ kind: z.literal('notes'), notes: nullable(text) }),
@@ -104,7 +107,7 @@ export function applyOperation(input: Session, raw: Operation, resolved?: { id: 
       const planned = s.workout.groups.flatMap(g => g.exercises).find(x => x.id === e.workoutExerciseId)
       if (planned && ((planned.sideMode === 'BILATERAL') !== (op.side === 'BOTH'))) throw new DomainError('VALIDATION', 'Choose a side matching the exercise')
       if (all().length >= 600) throw new DomainError('VALIDATION', 'At most 600 side-specific execution rows')
-      e.sets.push({ id: op.newSetId, sessionExerciseId: e.id, plannedSetId: null, setNumber: Math.max(0, ...e.sets.map(x => x.setNumber)) + 1, side: op.side, position: Math.max(-1, ...e.sets.map(x => x.position)) + 1, status: 'PENDING', ...blankMeasurements() }); break
+      e.sets.push({ id: op.newSetId, sessionExerciseId: e.id, plannedSetId: null, setNumber: Math.max(0, ...e.sets.map(x => x.setNumber)) + 1, side: op.side, kind: op.setKind, position: Math.max(-1, ...e.sets.map(x => x.position)) + 1, status: 'PENDING', ...blankMeasurements() }); break
     }
     case 'removeSet': {
       const set = findSet(op.setId)
@@ -137,6 +140,10 @@ export function executionOrder(s: Session): RecordedSet[] {
   return result
 }
 export function targetFor(s: Session, set: RecordedSet) { return s.workout.groups.flatMap(g => g.exercises.flatMap(e => e.sets)).find(p => p.id === set.plannedSetId) }
+export type SetKind = z.infer<typeof setKind>
+export const setKindLabels: Record<SetKind, string> = { WARMUP: 'Warm-up', WORKING: 'Working', BACKOFF: 'Back-off', DROP: 'Drop set' }
+// Sessions cached before set kinds existed have no kind; they were all working sets.
+export function setKindLabel(kind: SetKind | undefined) { return kind && kind !== 'WORKING' ? setKindLabels[kind] : '' }
 export const loadLabels: Record<z.infer<typeof convention>, string> = { TOTAL_EXTERNAL: 'total', PER_DUMBBELL: 'per dumbbell', ADDED: 'added', ASSISTANCE: 'assistance', BODYWEIGHT: 'bodyweight' }
 export function loadLabel(value: string | null, u: string | null, c: z.infer<typeof convention> | null, missing = 'unspecified load') {
   return c === 'BODYWEIGHT' ? 'bodyweight' : `${value === null ? missing : `${value} ${u?.toLowerCase()}`} ${c ? `· ${loadLabels[c]}` : ''}`.trim()

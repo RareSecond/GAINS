@@ -106,7 +106,7 @@ export async function startSession(userId: string, id: string, operationId: stri
     for (const [position, e] of w.groups.flatMap(g => g.exercises).entries()) {
       const exerciseId = randomUUID()
       await tx.sessionExercise.create({ data: { id: exerciseId, sessionId, workoutExerciseId: e.id, exerciseId: e.exerciseId, nameAtRecording: e.nameAtPrescription, position } })
-      await tx.sessionSet.createMany({ data: e.sets.map((s, position) => ({ id: randomUUID(), sessionId, sessionExerciseId: exerciseId, plannedSetId: s.id, setNumber: s.setNumber, side: s.side, position, status: 'PENDING' })) })
+      await tx.sessionSet.createMany({ data: e.sets.map((s, position) => ({ id: randomUUID(), sessionId, sessionExerciseId: exerciseId, plannedSetId: s.id, setNumber: s.setNumber, side: s.side, kind: s.kind, position, status: 'PENDING' })) })
     }
     return { id: sessionId, revision: 1 }
   })
@@ -142,7 +142,7 @@ export async function mutateSession(userId: string, id: string, raw: unknown) {
       await tx.sessionExercise.upsert({ where: { id: e.id }, create: { id: e.id, ...data }, update: data })
     }
     for (const e of after.exercises) for (const s of e.sets) {
-      const data = { sessionId: id, sessionExerciseId: e.id, plannedSetId: s.plannedSetId, setNumber: s.setNumber, side: s.side, position: s.position, status: s.status, actualReps: s.actualReps, actualLoadValue: s.actualLoadValue, actualLoadUnit: s.actualLoadUnit, actualLoadConvention: s.actualLoadConvention, actualRpe: s.actualRpe, notes: s.notes, completedAt: s.completedAt ? new Date(s.completedAt) : null }
+      const data = { sessionId: id, sessionExerciseId: e.id, plannedSetId: s.plannedSetId, setNumber: s.setNumber, side: s.side, kind: s.kind, position: s.position, status: s.status, actualReps: s.actualReps, actualLoadValue: s.actualLoadValue, actualLoadUnit: s.actualLoadUnit, actualLoadConvention: s.actualLoadConvention, actualRpe: s.actualRpe, notes: s.notes, completedAt: s.completedAt ? new Date(s.completedAt) : null }
       const existing = before.exercises.flatMap(x => x.sets).find(x => x.id === s.id)
       if (existing && JSON.stringify(existing) === JSON.stringify(s)) continue
       // Globally unique client IDs may not overwrite a row outside this owned session.
