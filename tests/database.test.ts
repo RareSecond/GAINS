@@ -116,6 +116,26 @@ dbTest('rest targets persist through replacement, frozen sessions and exercise h
   } finally { await cleanup([u.id]) }
 })
 
+dbTest('rep goals persist, are checked by the database and reach exercise history', async () => {
+  const u = await createUser()
+  try {
+    const f = await workout(u.id)
+    f.prescription.groups[3].exercises[0].sets[0].repsGoal = 10
+    await updateWorkout(u.id, f.saved.id, 1, randomUUID(), f.prescription)
+    const w = await getWorkout(u.id, f.saved.id)
+    const target = w.groups[3].exercises[0].sets[0]
+    assert.equal(target.repsGoal, 10)
+    assert.equal(w.groups[3].exercises[0].sets[1].repsGoal, null)
+    await assert.rejects(() => db.plannedSet.update({ where: { id: target.id }, data: { repsGoal: 11 } }))
+    await assert.rejects(() => db.plannedSet.update({ where: { id: target.id }, data: { repsGoal: 7 } }))
+    const started = await startSession(u.id, w.id, randomUUID()), s = await getSession(u.id, started.id)
+    assert.equal(s.workout.groups[3].exercises[0].sets[0].repsGoal, 10)
+    await mutateSession(u.id, s.id, { operationId: randomUUID(), expectedRevision: 1, operation: { kind: 'record', setId: s.exercises[3].sets[0].id, measurements: measurements() } })
+    const history = await exerciseHistory(u.id, f.catalog[3].id) as { sets: { plannedSet: { repsGoal: number | null } }[] }
+    assert.ok(history.sets.some(s => s.plannedSet.repsGoal === 10))
+  } finally { await cleanup([u.id]) }
+})
+
 dbTest('plate loading persists as decimal strings and is checked by the database', async () => {
   const u = await createUser()
   try {
