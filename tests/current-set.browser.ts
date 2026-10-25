@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto'
 import { createServer } from 'vite'
 import react from '@vitejs/plugin-react'
 import { chromium } from 'playwright'
-import { applyOperation, blankMeasurements, type Session } from '../src/lib/domain'
+import { applyOperation, blankMeasurements, setKindLabel, type Session } from '../src/lib/domain'
 import { fixtureNames, ids, prescription } from './fixture'
 
 process.env.PLAYWRIGHT_BROWSERS_PATH ??= `${process.cwd()}/.cache/browsers`
@@ -16,8 +16,9 @@ test('current-set mobile navigation, progression, drafts, corrections and offlin
   plan.groups[4].exercises[1].sets.forEach(s => s.restSeconds = 60)
   plan.groups[3].exercises[0].sets = [1, 2, 3, 4].map(setNumber => ({ ...plan.groups[3].exercises[0].sets[0], setNumber, repsMin: 6, repsMax: 8 }))
   plan.groups[3].exercises[0].sets[1].repsGoal = 7
+  plan.groups[3].exercises[0].sets[0].kind = 'WARMUP'
   const workout = { ...plan, id: randomUUID(), revision: 1, frozenAt: now, sessionId: id, url: '/', groups: plan.groups.map((g, position) => ({ ...g, id: randomUUID(), position, exercises: g.exercises.map((e, position) => ({ ...e, id: randomUUID(), position, nameAtPrescription: catalog.find(c => c.id === e.exerciseId)!.name, sets: e.sets.map(s => ({ ...s, id: randomUUID() })) })) })) }
-  let session: Session = { id, status: 'ACTIVE', revision: 1, startedAt: now, finishedAt: null, updatedAt: now, asOf: now, notes: null, workout, exercises: workout.groups.flatMap(g => g.exercises).map((e, position) => { const id = randomUUID(); return { id, exerciseId: e.exerciseId, workoutExerciseId: e.id, nameAtRecording: e.nameAtPrescription, position, notes: null, sets: e.sets.map((s, position) => ({ id: randomUUID(), sessionExerciseId: id, plannedSetId: s.id, setNumber: s.setNumber, side: s.side, position, status: 'PENDING', ...blankMeasurements() })) } }) }
+  let session: Session = { id, status: 'ACTIVE', revision: 1, startedAt: now, finishedAt: null, updatedAt: now, asOf: now, notes: null, workout, exercises: workout.groups.flatMap(g => g.exercises).map((e, position) => { const id = randomUUID(); return { id, exerciseId: e.exerciseId, workoutExerciseId: e.id, nameAtRecording: e.nameAtPrescription, position, notes: null, sets: e.sets.map((s, position) => ({ id: randomUUID(), sessionExerciseId: id, plannedSetId: s.id, setNumber: s.setNumber, side: s.side, kind: s.kind, position, status: 'PENDING', ...blankMeasurements() })) } }) }
   await mkdir('test-results', { recursive: true })
   await writeFile('test-results/focus.html', '<div id="root"></div><script type="module">import React from "react";import {createRoot} from "react-dom/client";import {Remote} from "/src/remote.tsx";import "/src/style.css";createRoot(document.getElementById("root")).render(React.createElement(Remote));</script>')
   const server = await createServer({ configFile: false, plugins: [react(), { name: 'focus-test-entry', configureServer(server) { server.middlewares.use((req, _res, next) => { if (req.url?.startsWith('/sessions/')) req.url = '/test-results/focus.html'; next() }) } }], cacheDir: '.cache/focus-vite', server: { host: '127.0.0.1', port: 3107, strictPort: true } })
@@ -65,7 +66,7 @@ test('current-set mobile navigation, progression, drafts, corrections and offlin
   const select = async (exercise: number, set = 0) => {
     const e = session.exercises[exercise], s = e.sets[set]
     await page.getByRole('combobox', { name: 'Choose exercise' }).selectOption(e.id)
-    await page.getByRole('button', { name: `Open set ${s.setNumber} ${s.side.toLowerCase()} · ${s.status.toLowerCase()}`, exact: true }).click()
+    await page.getByRole('button', { name: `Open set ${s.setNumber} ${s.side.toLowerCase()}${setKindLabel(s.kind) ? ` ${setKindLabel(s.kind).toLowerCase()}` : ''} · ${s.status.toLowerCase()}`, exact: true }).click()
   }
   let savedRevision = 1
   const saved = async (newSave = true) => {
@@ -134,7 +135,14 @@ test('current-set mobile navigation, progression, drafts, corrections and offlin
     await page.setViewportSize({ width: 390, height: 844 })
     await page.screenshot({ path: 'test-results/range-reps-mobile.png', fullPage: true })
     for (const [i, n] of [6, 7, 8].entries()) {
+      if (i === 0) {
+        await focus.locator('.set-heading .set-kind').getByText('Warm-up', { exact: true }).waitFor()
+        await focus.getByRole('button', { name: /^Open set 1 both warm-up/ }).waitFor()
+        assert.equal(await focus.getByRole('button', { name: /^Open set 2 both ·/ }).innerText(), '2')
+        await focus.screenshot({ path: 'test-results/warmup-mobile.png' })
+      }
       if (i === 1) {
+        assert.equal(await focus.locator('.set-heading .set-kind').count(), 0)
         assert.deepEqual(await focus.locator('.rep-options button').allTextContents(), ['6reps', '7reps · goal', '8reps'])
         await focus.getByText('GOAL REPS', { exact: true }).waitFor()
         await focus.getByText('range 6–8', { exact: true }).waitFor()
