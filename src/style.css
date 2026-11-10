@@ -9,6 +9,7 @@
 
 .rest-timer{position:relative;display:flex;flex-direction:column;align-items:center;gap:8px;text-align:center;background:#253123;color:var(--lime);border:1px solid #536846;border-radius:20px;padding:24px 20px;margin:14px 0}
 .rest-timer.resting{background:var(--lime);border-color:var(--lime);color:#111512}
+.rest-timer{scroll-margin:12px}.rest-timer:focus,.current-set:focus{outline:none}.rest-timer:focus-visible,.current-set:focus-visible{outline:3px solid var(--lime);outline-offset:3px}
 .rest-timer h2{margin:0;font-size:1rem;letter-spacing:.15em;text-transform:uppercase}
 .rest-timer strong{display:block;font:600 clamp(4.5rem,24vw,7rem)/1 "Space Grotesk",system-ui;letter-spacing:-.04em;font-variant-numeric:tabular-nums}
 .rest-timer p{margin:0;font-size:.9rem}

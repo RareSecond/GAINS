@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { Volume2, VolumeX } from 'lucide-react'
 import { counts, durationLabel, executionOrder, loadLabel, loadLabels, platesLabel, repsLabel, measurementsSchema, setKindLabel, setKindLabels, type SetKind, targetFor, type Measurements, type Operation, type RecordedExercise, type RecordedSet, type Session } from './lib/domain'
 import { apiGet, apiPost, ApiError } from './lib/api-client'
@@ -150,7 +150,7 @@ export function Recorder({ profile, id }: { profile: Profile; id: string }) {
       if (soundEnabled && soundReady) setSoundEnabled(false)
       else { setSoundEnabled(true); enableSound() }
     }} onSkip={() => dismissRest(record.rest!.until)} />}
-    {active && current && currentExercise && <section className="current-set" aria-label="Current set">
+    {active && current && currentExercise && <section className="current-set" aria-label="Current set" tabIndex={-1}>
       {current.status !== 'PENDING' && <p className="eyebrow">REVIEW SET</p>}
       <ExerciseCard key={currentExercise.id} exercise={currentExercise} session={session} readonly={readonly} drafts={record.drafts} onDraft={draft} onMutate={mutate} onSubstitute={() => setSelection({ mode: 'substitute', exercise: currentExercise })} focusSet={current} switcher={<select aria-label="Choose exercise" value={currentExercise.id} onChange={event => { const e = session.exercises.find(e => e.id === event.target.value)!; openSet((e.sets.find(s => s.status === 'PENDING') ?? e.sets[0]).id) }}>{session.exercises.filter(e => e.sets.length).map(e => <option key={e.id} value={e.id}>{e.nameAtRecording}</option>)}</select>} />
       <nav className="set-navigation" aria-label="Sets for current exercise">{currentExercise.sets.map(s => <button key={s.id} className="secondary" aria-pressed={current.id === s.id} aria-label={`Open set ${s.setNumber} ${s.side.toLowerCase()}${setKindLabel(s.kind) ? ` ${setKindLabel(s.kind).toLowerCase()}` : ''} · ${s.status.toLowerCase()}`} onClick={() => setSelectedSetId(s.id)}><span>{s.status === 'COMPLETED' ? '✓ ' : s.status === 'SKIPPED' ? '− ' : ''}{setKindLabel(s.kind) ? setKindLabel(s.kind)[0] : ''}{s.setNumber}{s.side === 'BOTH' ? '' : s.side === 'LEFT' ? ' L' : ' R'}</span></button>)}</nav>
@@ -182,8 +182,19 @@ function WorkoutClock({ startedAt }: { startedAt: string }) {
 }
 function RestTimer({ until, onSkip, onComplete, sound, onSound }: { until: number; onSkip: () => Promise<void>; onComplete: (alert: boolean) => void; sound: boolean; onSound: () => void }) {
   const [now, setNow] = useState(Date.now)
-  const notified = useRef<number | null>(null), openedAt = useRef(Date.now()), complete = useRef(onComplete)
+  const notified = useRef<number | null>(null), openedAt = useRef(Date.now()), complete = useRef(onComplete), region = useRef<HTMLElement>(null)
   complete.current = onComplete
+  // A new rest period takes focus and scrolls into view, so the countdown is never left above the fold after confirming a set.
+  useEffect(() => {
+    const element = region.current
+    if (!element) return
+    element.focus({ preventScroll: true })
+    element.scrollIntoView({ block: 'nearest', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
+  }, [until])
+  // Expiry or skipping removes the timer; hand focus to the current set rather than dropping it to the document. Runs before the region leaves the DOM.
+  useLayoutEffect(() => () => {
+    if (region.current?.contains(document.activeElement)) document.querySelector<HTMLElement>('.current-set')?.focus({ preventScroll: true })
+  }, [])
   useEffect(() => {
     const tick = () => {
       const now = Date.now(); setNow(now)
@@ -198,7 +209,7 @@ function RestTimer({ until, onSkip, onComplete, sound, onSound }: { until: numbe
     return () => { window.clearInterval(timer); window.removeEventListener('focus', tick); document.removeEventListener('visibilitychange', tick) }
   }, [until])
   const seconds = Math.max(0, Math.ceil((until - now) / 1000))
-  return <section className={`rest-timer${seconds > 0 ? ' resting' : ''}`} aria-label="Rest timer">
+  return <section ref={region} tabIndex={-1} className={`rest-timer${seconds > 0 ? ' resting' : ''}`} aria-label="Rest timer">
     <button className="rest-sound" aria-label="Rest alert sound" aria-pressed={sound} title={sound ? 'Mute rest alert' : 'Enable rest alert sound'} onClick={onSound}>{sound ? <Volume2 size={20} aria-hidden="true" /> : <VolumeX size={20} aria-hidden="true" />}</button>
     {seconds > 0 ? <><h2>Resting</h2><strong role="timer" aria-live="off" aria-label={`${seconds} seconds remaining`}>{Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, '0')}</strong><p className="rest-caption">Rest time remaining<span>minutes : seconds</span></p></> : <p role="status">Rest complete · ready for your next set</p>}
     <button className="secondary full" onClick={onSkip}>{seconds > 0 ? 'Skip rest' : 'Dismiss'}</button>
