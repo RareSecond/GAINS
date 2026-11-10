@@ -182,8 +182,15 @@ function WorkoutClock({ startedAt }: { startedAt: string }) {
 }
 function RestTimer({ until, onSkip, onComplete, sound, onSound }: { until: number; onSkip: () => Promise<void>; onComplete: (alert: boolean) => void; sound: boolean; onSound: () => void }) {
   const [now, setNow] = useState(Date.now)
-  const notified = useRef<number | null>(null), openedAt = useRef(Date.now()), complete = useRef(onComplete)
+  const notified = useRef<number | null>(null), openedAt = useRef(Date.now()), complete = useRef(onComplete), region = useRef<HTMLElement>(null)
   complete.current = onComplete
+  // A new rest period takes focus and scrolls into view, so the countdown is never left above the fold after confirming a set.
+  useEffect(() => {
+    const element = region.current
+    if (!element) return
+    element.focus({ preventScroll: true })
+    element.scrollIntoView({ block: 'nearest', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
+  }, [until])
   useEffect(() => {
     const tick = () => {
       const now = Date.now(); setNow(now)
@@ -198,7 +205,7 @@ function RestTimer({ until, onSkip, onComplete, sound, onSound }: { until: numbe
     return () => { window.clearInterval(timer); window.removeEventListener('focus', tick); document.removeEventListener('visibilitychange', tick) }
   }, [until])
   const seconds = Math.max(0, Math.ceil((until - now) / 1000))
-  return <section className={`rest-timer${seconds > 0 ? ' resting' : ''}`} aria-label="Rest timer">
+  return <section ref={region} tabIndex={-1} className={`rest-timer${seconds > 0 ? ' resting' : ''}`} aria-label="Rest timer">
     <button className="rest-sound" aria-label="Rest alert sound" aria-pressed={sound} title={sound ? 'Mute rest alert' : 'Enable rest alert sound'} onClick={onSound}>{sound ? <Volume2 size={20} aria-hidden="true" /> : <VolumeX size={20} aria-hidden="true" />}</button>
     {seconds > 0 ? <><h2>Resting</h2><strong role="timer" aria-live="off" aria-label={`${seconds} seconds remaining`}>{Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, '0')}</strong><p className="rest-caption">Rest time remaining<span>minutes : seconds</span></p></> : <p role="status">Rest complete · ready for your next set</p>}
     <button className="secondary full" onClick={onSkip}>{seconds > 0 ? 'Skip rest' : 'Dismiss'}</button>
