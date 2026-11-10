@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { Volume2, VolumeX } from 'lucide-react'
 import { counts, durationLabel, executionOrder, loadLabel, loadLabels, platesLabel, repsLabel, measurementsSchema, setKindLabel, setKindLabels, type SetKind, targetFor, type Measurements, type Operation, type RecordedExercise, type RecordedSet, type Session } from './lib/domain'
 import { apiGet, apiPost, ApiError } from './lib/api-client'
@@ -150,7 +150,7 @@ export function Recorder({ profile, id }: { profile: Profile; id: string }) {
       if (soundEnabled && soundReady) setSoundEnabled(false)
       else { setSoundEnabled(true); enableSound() }
     }} onSkip={() => dismissRest(record.rest!.until)} />}
-    {active && current && currentExercise && <section className="current-set" aria-label="Current set">
+    {active && current && currentExercise && <section className="current-set" aria-label="Current set" tabIndex={-1}>
       {current.status !== 'PENDING' && <p className="eyebrow">REVIEW SET</p>}
       <ExerciseCard key={currentExercise.id} exercise={currentExercise} session={session} readonly={readonly} drafts={record.drafts} onDraft={draft} onMutate={mutate} onSubstitute={() => setSelection({ mode: 'substitute', exercise: currentExercise })} focusSet={current} switcher={<select aria-label="Choose exercise" value={currentExercise.id} onChange={event => { const e = session.exercises.find(e => e.id === event.target.value)!; openSet((e.sets.find(s => s.status === 'PENDING') ?? e.sets[0]).id) }}>{session.exercises.filter(e => e.sets.length).map(e => <option key={e.id} value={e.id}>{e.nameAtRecording}</option>)}</select>} />
       <nav className="set-navigation" aria-label="Sets for current exercise">{currentExercise.sets.map(s => <button key={s.id} className="secondary" aria-pressed={current.id === s.id} aria-label={`Open set ${s.setNumber} ${s.side.toLowerCase()}${setKindLabel(s.kind) ? ` ${setKindLabel(s.kind).toLowerCase()}` : ''} · ${s.status.toLowerCase()}`} onClick={() => setSelectedSetId(s.id)}><span>{s.status === 'COMPLETED' ? '✓ ' : s.status === 'SKIPPED' ? '− ' : ''}{setKindLabel(s.kind) ? setKindLabel(s.kind)[0] : ''}{s.setNumber}{s.side === 'BOTH' ? '' : s.side === 'LEFT' ? ' L' : ' R'}</span></button>)}</nav>
@@ -191,6 +191,10 @@ function RestTimer({ until, onSkip, onComplete, sound, onSound }: { until: numbe
     element.focus({ preventScroll: true })
     element.scrollIntoView({ block: 'nearest', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
   }, [until])
+  // Expiry or skipping removes the timer; hand focus to the current set rather than dropping it to the document. Runs before the region leaves the DOM.
+  useLayoutEffect(() => () => {
+    if (region.current?.contains(document.activeElement)) document.querySelector<HTMLElement>('.current-set')?.focus({ preventScroll: true })
+  }, [])
   useEffect(() => {
     const tick = () => {
       const now = Date.now(); setNow(now)
