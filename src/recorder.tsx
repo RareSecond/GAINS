@@ -180,16 +180,28 @@ function WorkoutClock({ startedAt }: { startedAt: string }) {
   const label = durationLabel(startedAt, now)
   return <div className="workout-clock"><strong>{label}</strong><span>total time</span></div>
 }
+function revealFully(element: HTMLElement, smooth: boolean, margin = 12) {
+  const viewport = window.visualViewport, top = (viewport?.offsetTop ?? 0) + margin, bottom = (viewport ? viewport.offsetTop + viewport.height : innerHeight) - margin
+  const box = element.getBoundingClientRect()
+  // Too tall to fit: show its top. Otherwise move the least distance that brings both edges inside.
+  const delta = box.top < top || box.height > bottom - top ? box.top - top : box.bottom > bottom ? box.bottom - bottom : 0
+  if (Math.abs(delta) >= 1) window.scrollBy({ top: delta, behavior: smooth ? 'smooth' : 'auto' })
+}
 function RestTimer({ until, onSkip, onComplete, sound, onSound }: { until: number; onSkip: () => Promise<void>; onComplete: (alert: boolean) => void; sound: boolean; onSound: () => void }) {
   const [now, setNow] = useState(Date.now)
   const notified = useRef<number | null>(null), openedAt = useRef(Date.now()), complete = useRef(onComplete), region = useRef<HTMLElement>(null)
   complete.current = onComplete
-  // A new rest period takes focus and scrolls into view, so the countdown is never left above the fold after confirming a set.
+  // A new rest period takes focus and scrolls fully into view, so the countdown is never left above the fold after confirming a set.
+  // Measured against the visual viewport (iOS toolbars), and re-checked once the smooth scroll should have settled, because a layout change mid-scroll can stop it short.
   useEffect(() => {
     const element = region.current
     if (!element) return
     element.focus({ preventScroll: true })
-    element.scrollIntoView({ block: 'nearest', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
+    const smooth = !matchMedia('(prefers-reduced-motion: reduce)').matches
+    revealFully(element, smooth)
+    if (!smooth) return
+    const settle = window.setTimeout(() => revealFully(element, false), 700)
+    return () => window.clearTimeout(settle)
   }, [until])
   // Expiry or skipping removes the timer; hand focus to the current set rather than dropping it to the document. Runs before the region leaves the DOM.
   useLayoutEffect(() => () => {
