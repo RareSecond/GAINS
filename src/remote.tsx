@@ -12,7 +12,7 @@ type Context = { active: { id: string; title: string; completed: number; unrecor
 export function Remote() {
   const { profile, error: accountError } = useAccount(), update = useAppUpdate(), error = accountError || update.error
   const path = window.location.pathname
-  const notice = update.available && <div className="update-toast" role="status"><span>A new version of GAINS is ready.</span><button onClick={update.apply}>Reload</button></div>
+  const notice = update.available && <div className="update-toast" role="status">{update.held ? <span>A new version of GAINS is ready. This page will update once your unsaved input is retained or you leave the page.</span> : <><span>A new version of GAINS is ready.</span><button onClick={update.apply}>Reload</button></>}</div>
   if (path === '/login') return <>{notice}<Login /></>
   if (profile === null) return <>{notice}<Landing returnTo={path} /></>
   return <>{notice}<header className={`topbar ${path.startsWith('/sessions/') ? 'session-topbar' : ''}`}><a className="brand" href="/"><img className="logo" src="/logo.png" alt="GAINS" width="512" height="512" /><span>TRAINING REMOTE</span></a><a className="icon-link" href="/settings" aria-label="Account settings">⚙</a></header><main className={path.startsWith('/sessions/') ? 'session-main' : undefined}>
