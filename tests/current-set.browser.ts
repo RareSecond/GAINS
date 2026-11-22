@@ -51,6 +51,11 @@ test('current-set mobile navigation, progression, drafts, corrections and offlin
   })
   const beeps = () => page.evaluate(() => (window as typeof window & { restBeeps: number }).restBeeps)
   await page.clock.install()
+  // Every new rest period, not only the first, must take focus and end up entirely inside the viewport.
+  const restRevealed = async () => {
+    await page.waitForFunction(() => document.activeElement?.matches('.rest-timer'))
+    await page.waitForFunction(() => { const r = document.querySelector('.rest-timer')!.getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight })
+  }
   const restDeadline = () => page.evaluate(async () => {
     const db = await new Promise<IDBDatabase>(resolve => { const r = indexedDB.open('gains-v1'); r.onsuccess = () => resolve(r.result) })
     try { return await new Promise<number | undefined>(resolve => { const r = db.transaction('records').objectStore('records').get(`session:test-athlete:${location.pathname.split('/')[2]}`); r.onsuccess = () => resolve(r.result.rest?.until) }) } finally { db.close() }
@@ -170,8 +175,7 @@ test('current-set mobile navigation, progression, drafts, corrections and offlin
     assert.equal(session.workout.groups[2].exercises[0].sets[0].loadValue, '60')
     await page.getByRole('timer').waitFor()
     const restRegion = page.getByRole('region', { name: 'Rest timer' })
-    await page.waitForFunction(() => document.activeElement?.matches('.rest-timer'))
-    await page.waitForFunction(() => { const r = document.querySelector('.rest-timer')!.getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight })
+    await restRevealed()
     assert.ok(await restRegion.isVisible(), 'A new rest timer must be focused and in view')
     const deadline = await restDeadline()
     await page.clock.fastForward(5000)
@@ -205,7 +209,7 @@ test('current-set mobile navigation, progression, drafts, corrections and offlin
     await page.getByRole('status').filter({ hasText: 'Offline · 1 changes retained' }).waitFor()
     await focus.getByText('Set 2 · left', { exact: true }).waitFor()
     assert.equal(session.exercises[5].sets[0].status, 'PENDING')
-    await page.getByRole('timer').waitFor()
+    await page.getByRole('timer').waitFor(); await restRevealed()
     const offlineDeadline = await restDeadline()
     await page.clock.fastForward(5000)
     await context.setOffline(false); await saved()
@@ -219,7 +223,9 @@ test('current-set mobile navigation, progression, drafts, corrections and offlin
     await page.clock.fastForward(61000)
     assert.equal(await beeps(), 1, 'Skipping rest must cancel its alert')
     await select(5, 1)
+    await page.evaluate(() => scrollTo(0, document.documentElement.scrollHeight))
     await confirm.click(); await saved()
+    await restRevealed()
     await page.getByRole('button', { name: 'Rest alert sound' }).click()
     assert.equal(await page.getByRole('button', { name: 'Rest alert sound' }).getAttribute('aria-pressed'), 'false')
     await page.clock.fastForward(61000)
