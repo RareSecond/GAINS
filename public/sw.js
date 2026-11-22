@@ -10,6 +10,8 @@ self.addEventListener('activate', event => event.waitUntil((async () => {
   for (const key of await caches.keys()) if (key.startsWith('gains-shell-') && key !== CACHE) await caches.delete(key);
   await self.clients.claim();
 })()));
+// A new version waits until the page asks it to take over, so a reload never interrupts recording.
+self.addEventListener('message', event => { if (event.data?.type === 'skip-waiting') self.skipWaiting(); });
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin || event.request.method !== 'GET') return;

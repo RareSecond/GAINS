@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { authClient } from './lib/auth-client'
 import { apiGet, apiPost } from './lib/api-client'
 import { useAccount } from './lib/use-account'
+import { useAppUpdate } from './lib/app-update'
 import { editLocal, readLocal, unsaved, type Profile } from './lib/local'
 import { durationLabel, loadLabel, platesLabel, repsLabel, setKindLabel, type Workout } from './lib/domain'
 import { Recorder } from './recorder'
@@ -9,11 +10,12 @@ import { Landing } from './landing'
 
 type Context = { active: { id: string; title: string; completed: number; unrecorded: number } | null; upcoming: { id: string; title: string; createdAt: string }[]; recent: { id: string; title: string; completed: number; skipped: number; unrecorded: number; startedAt: string; finishedAt: string }[]; nextCursor: string | null; asOf: string }
 export function Remote() {
-  const { profile, error } = useAccount()
+  const { profile, error: accountError } = useAccount(), update = useAppUpdate(), error = accountError || update.error
   const path = window.location.pathname
-  if (path === '/login') return <Login />
-  if (profile === null) return <Landing returnTo={path} />
-  return <><header className={`topbar ${path.startsWith('/sessions/') ? 'session-topbar' : ''}`}><a className="brand" href="/"><img className="logo" src="/logo.png" alt="GAINS" width="512" height="512" /><span>TRAINING REMOTE</span></a><a className="icon-link" href="/settings" aria-label="Account settings">⚙</a></header><main className={path.startsWith('/sessions/') ? 'session-main' : undefined}>
+  const notice = update.available && <div className="update-toast" role="status"><span>A new version of GAINS is ready.</span><button onClick={update.apply}>Reload</button></div>
+  if (path === '/login') return <>{notice}<Login /></>
+  if (profile === null) return <>{notice}<Landing returnTo={path} /></>
+  return <>{notice}<header className={`topbar ${path.startsWith('/sessions/') ? 'session-topbar' : ''}`}><a className="brand" href="/"><img className="logo" src="/logo.png" alt="GAINS" width="512" height="512" /><span>TRAINING REMOTE</span></a><a className="icon-link" href="/settings" aria-label="Account settings">⚙</a></header><main className={path.startsWith('/sessions/') ? 'session-main' : undefined}>
     {error && <p role="alert" className="notice warning">{error} Local retention may be unavailable.</p>}
     {profile === undefined ? <p className="muted">Opening your remote…</p> :
       path.startsWith('/sessions/') ? <Recorder key={`${profile.id}:${path}`} profile={profile} id={path.split('/')[2]} /> :

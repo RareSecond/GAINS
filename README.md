@@ -56,6 +56,8 @@ The service worker precaches only the empty `/offline` shell and built public as
 
 GAINS is an installable PWA: `public/manifest.webmanifest` opens `/` standalone, with icons generated from the GAINS logo (separate maskable variants keep the artwork inside Android's safe zone). Launching the installed app offline opens the cached shell rather than a browser error. The dashboard still needs the network for its workout list, so open an active session online first.
 
+The open app checks for a new build every 30 minutes, when it returns to the foreground, and when it reconnects. A new service worker waits instead of taking over mid-workout; the app shows a "new version" prompt, and Reload activates it and reloads every open GAINS window onto the new build. Drafts, the outbox and the rest timer live in IndexedDB, so the reload loses nothing.
+
 Conflicts retain the local version, show the server comparison, and require either explicitly discarding local changes or reapplying compatible edits. A finished server session cannot be reopened. Retained changes can be exported before discarding. Browser storage failures are visible and block further recording instead of claiming offline safety.
 
 Sign-out hides cached data and stops uploads. If drafts or queued edits exist, the user must deliberately choose to sign out while retaining them. The same authenticated account must return before uploading. Each sync verifies the server identity; another account cannot acquire or upload the old queue. Local data remains on that browser profile until site storage is cleared.
