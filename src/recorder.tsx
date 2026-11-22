@@ -4,6 +4,7 @@ import { counts, durationLabel, executionOrder, loadLabel, loadLabels, platesLab
 import { apiGet, apiPost, ApiError } from './lib/api-client'
 import { cacheSession, editLocal, readLocal, sessionKey, syncSession, watchLocal, type Profile } from './lib/local'
 import { enqueue, projected, reapply, type Draft, type LocalSession } from './lib/outbox'
+import { holdReload } from './lib/app-update'
 
 type CatalogItem = { id: string; name: string }
 export function Recorder({ profile, id }: { profile: Profile; id: string }) {
@@ -12,6 +13,8 @@ export function Recorder({ profile, id }: { profile: Profile; id: string }) {
   const [catalog, setCatalog] = useState<CatalogItem[]>([]), [selection, setSelection] = useState<{ mode: 'extra' | 'substitute'; exercise?: RecordedExercise }>(), [finish, setFinish] = useState(false)
   const [selectedSetId, setSelectedSetId] = useState<string>(), [overviewOpen, setOverviewOpen] = useState(false)
   const [cancelOperation, setCancelOperation] = useState<string>(), [cancelling, setCancelling] = useState(false)
+  // Without working local storage, typed input lives only in this page; an app update must not reload it away.
+  useEffect(() => { holdReload(!!storageError); return () => holdReload(false) }, [storageError])
   const audio = useRef<AudioContext | null>(null)
   const [soundEnabled, setSoundEnabled] = useState(true), [soundReady, setSoundReady] = useState(false)
   const enableSound = () => {
